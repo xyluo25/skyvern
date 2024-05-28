@@ -762,6 +762,7 @@ function buildTreeFromBody() {
       // If the element is interactable and has an interactable parent,
       // then add it to the children of the parent
       else {
+        // TODO: use dict/object so that we access these in O(1) instead
         elements
           .find((element) => element.id === parentId)
           .children.push(elementObj);
@@ -803,6 +804,7 @@ function buildTreeFromBody() {
           if (parentId === null) {
             resultArray.push(elementObj);
           } else {
+            // TODO: use dict/object so that we access these in O(1) instead
             elements
               .find((element) => element.id === parentId)
               .children.push(elementObj);
