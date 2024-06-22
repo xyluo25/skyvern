@@ -25,7 +25,7 @@
   <a href="https://www.linkedin.com/company/95726232"><img src="https://img.shields.io/badge/Follow%20 on%20LinkedIn-8A2BE2?logo=linkedin"/></a>
 </p>
 
-[Skyvern](https://www.skyvern.com) automates browser-based workflows using LLMs and computer vision. It provides a simple API endpoint to fully automate manual workflows, replacing brittle or unreliable automation solutions. 
+[Skyvern](https://www.skyvern.com) automates browser-based workflows using LLMs and computer vision. It provides a simple API endpoint to fully automate manual workflows on a large number of websites, replacing brittle or unreliable automation solutions. 
 
 <p align="center">
   <img src="docs/images/geico_shu_recording_cropped.gif"/>
@@ -33,12 +33,13 @@
 
 Traditional approaches to browser automations required writing custom scripts for websites, often relying on DOM parsing and XPath-based interactions which would break whenever the website layouts changed.
 
-Instead of only relying on code-defined XPath interactions, Skyvern adds computer vision and LLMs to the mix to parse items in the viewport in real-time, create a plan for interaction and interact with them.
+Instead of only relying on code-defined XPath interactions, Skyvern relies on prompts in addition to computer vision and LLMs to the mix to parse items in the viewport in real-time, create a plan for interaction and interact with them.
 
 This approach gives us a few advantages:
 
 1. Skyvern can operate on websites it’s never seen before, as it’s able to map visual elements to actions necessary to complete a workflow, without any customized code
 1. Skyvern is resistant to website layout changes, as there are no pre-determined XPaths or other selectors our system is looking for while trying to navigate
+1. Skyvern is able to take a single workflow and apply it to a large number of websites, as it’s able to reason through the interactions necessary to complete the workflow
 1. Skyvern leverages LLMs to reason through interactions to ensure we can cover complex situations. Examples include:
     1. If you wanted to get an auto insurance quote from Geico, the answer to a common question “Were you eligible to drive at 18?” could be inferred from the driver receiving their license at age 16
     1. If you were doing competitor analysis, it’s understanding that an Arnold Palmer 22 oz can at 7/11 is almost definitely the same product as a 23 oz can at Gopuff (even though the sizes are slightly different, which could be a rounding error!)
@@ -67,7 +68,17 @@ https://github.com/Skyvern-AI/skyvern/assets/3853670/4fd87a66-39a1-4c3b-b9ac-64c
 # Skyvern Cloud
 We offer a managed cloud version of Skyvern that allows you to run Skyvern without having to manage the infrastructure. It allows to you run multiple Skyvern instances in parallel to automate your workflows at scale. In addition, Skyvern cloud comes bundled with anti-bot detection mechanisms, proxy network, and CAPTCHA solving to allow you to complete more complicated workflows.
 
-Skyvern Cloud is currently in private beta. If you're interested in using Skyvern Cloud, please reach out to us [via email](mailto:suchintan@skyvern.com) 
+If you'd like to try it out, 
+1. Navigate to [app.skyvern.com](https://app.skyvern.com)
+2. Create an account
+3. Set up your credit card information to get $5 of credits on us
+4. Kick off your first task and see Skyvern in action!
+
+Here are some tips that may help you on your adventure:
+1. Skyvern is really good at carrying out one task. If you give it too many instructions to do, it has a high likelihood of getting confused along the way.
+2. Being really explicit about goals is very important. For example, if you're generating an insurance quote, let it know very clearly how it can identify it's accomplished its goals. Use words like "COMPLETE" or "TERMINATE" to indicate success and failure modes, respectively.
+3. If you'd like to do more advanced things such as chaining multiple instructions together, or securely logging in, please feel free to book some time with me! I'm always happy to help
+
 
 # Quickstart
 This quickstart guide will walk you through getting Skyvern up and running on your local machine. 
@@ -181,6 +192,19 @@ You'll need to have Skyvern running locally if you want to try these examples ou
 ```
 ./run_skyvern.sh
 ```
+
+## Invoice Downloading on many different websites
+Reach out to us (founders@skyvern.com) to see this live
+
+<p align="center">
+  <img src="docs/images/invoice_downloading.gif"/>
+</p>
+
+## Automate the job application process
+💡 See it in action at [app.skyvern.com](https://app.skyvern.com)
+<p align="center">
+  <img src="docs/images/job_application_demo.gif"/>
+</p>
 
 ## Automate materials procurement for a manufacturing company
 💡 See it in action

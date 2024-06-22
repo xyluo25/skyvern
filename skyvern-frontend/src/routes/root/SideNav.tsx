@@ -8,16 +8,13 @@ import { NavLink } from "react-router-dom";
 
 function SideNav() {
   return (
-    <nav>
+    <nav className="space-y-2">
       <NavLink
         to="create"
         className={({ isActive }) => {
-          return cn(
-            "flex items-center px-6 py-4 hover:bg-primary-foreground rounded-2xl",
-            {
-              "bg-primary-foreground": isActive,
-            },
-          );
+          return cn("flex items-center px-5 py-3 hover:bg-muted rounded-2xl", {
+            "bg-muted": isActive,
+          });
         }}
       >
         <PlusCircledIcon className="mr-4 w-6 h-6" />
@@ -26,12 +23,9 @@ function SideNav() {
       <NavLink
         to="tasks"
         className={({ isActive }) => {
-          return cn(
-            "flex items-center px-6 py-4 hover:bg-primary-foreground rounded-2xl",
-            {
-              "bg-primary-foreground": isActive,
-            },
-          );
+          return cn("flex items-center px-5 py-3 hover:bg-muted rounded-2xl", {
+            "bg-muted": isActive,
+          });
         }}
       >
         <ListBulletIcon className="mr-4 w-6 h-6" />
@@ -40,12 +34,9 @@ function SideNav() {
       <NavLink
         to="settings"
         className={({ isActive }) => {
-          return cn(
-            "flex items-center px-6 py-4 hover:bg-primary-foreground rounded-2xl",
-            {
-              "bg-primary-foreground": isActive,
-            },
-          );
+          return cn("flex items-center px-5 py-3 hover:bg-muted rounded-2xl", {
+            "bg-muted": isActive,
+          });
         }}
       >
         <GearIcon className="mr-4 w-6 h-6" />

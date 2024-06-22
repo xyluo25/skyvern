@@ -46,7 +46,6 @@ RESERVED_ATTRIBUTES = {
 
 ELEMENT_NODE_ATTRIBUTES = {
     "id",
-    "interactable",
 }
 
 
@@ -298,6 +297,12 @@ async def scrape_web_unsafe(
     )
 
 
+async def get_select2_options(page: Page) -> list[dict[str, Any]]:
+    await page.evaluate(JS_FUNCTION_DEFS)
+    js_script = "async () => await getSelect2Options()"
+    return await page.evaluate(js_script)
+
+
 async def get_interactable_element_tree_in_frame(
     frames: list[Frame], elements: list[dict], element_tree: list[dict]
 ) -> tuple[list[dict], list[dict]]:
@@ -316,7 +321,7 @@ async def get_interactable_element_tree_in_frame(
 
         unique_id = await frame_element.get_attribute("unique_id")
 
-        frame_js_script = f"() => buildTreeFromBody('{unique_id}')"
+        frame_js_script = f"async () => await buildTreeFromBody('{unique_id}', true)"
 
         await frame.evaluate(JS_FUNCTION_DEFS)
         frame_elements, frame_element_tree = await frame.evaluate(frame_js_script)
@@ -346,7 +351,7 @@ async def get_interactable_element_tree(page: Page) -> tuple[list[dict], list[di
     :return: Tuple containing the element tree and a map of element IDs to elements.
     """
     await page.evaluate(JS_FUNCTION_DEFS)
-    main_frame_js_script = "() => buildTreeFromBody('main.frame')"
+    main_frame_js_script = "async () => await buildTreeFromBody('main.frame', true)"
     elements, element_tree = await page.evaluate(main_frame_js_script)
 
     # FIXME: some unexpected exception in iframe. turn off temporarily
@@ -366,7 +371,7 @@ async def scroll_to_top(page: Page, drow_boxes: bool) -> float:
     :return: Screenshot of the page.
     """
     await page.evaluate(JS_FUNCTION_DEFS)
-    js_script = f"() => scrollToTop({str(drow_boxes).lower()})"
+    js_script = f"async () => await scrollToTop({str(drow_boxes).lower()})"
     scroll_y_px = await page.evaluate(js_script)
     return scroll_y_px
 
@@ -379,7 +384,7 @@ async def scroll_to_next_page(page: Page, drow_boxes: bool) -> bool:
     :return: Screenshot of the page.
     """
     await page.evaluate(JS_FUNCTION_DEFS)
-    js_script = f"() => scrollToNextPage({str(drow_boxes).lower()})"
+    js_script = f"async () => await scrollToNextPage({str(drow_boxes).lower()})"
     scroll_y_px = await page.evaluate(js_script)
     return scroll_y_px
 
@@ -424,6 +429,9 @@ def trim_element_tree(elements: list[dict]) -> list[dict]:
         queue_ele = queue.pop(0)
         if "frame" in queue_ele:
             del queue_ele["frame"]
+
+        if not queue_ele.get("interactable"):
+            del queue_ele["id"]
 
         if "attributes" in queue_ele:
             tag_name = queue_ele["tagName"] if "tagName" in queue_ele else ""

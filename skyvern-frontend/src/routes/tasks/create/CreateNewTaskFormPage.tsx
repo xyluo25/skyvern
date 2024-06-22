@@ -6,6 +6,7 @@ import { getSampleForInitialFormValues } from "../data/sampleTaskData";
 import { SampleCase, sampleCases } from "../types";
 import { CreateNewTaskForm } from "./CreateNewTaskForm";
 import { SavedTaskForm } from "./SavedTaskForm";
+import { WorkflowParameter } from "@/api/types";
 
 function CreateNewTaskFormPage() {
   const { template } = useParams();
@@ -41,6 +42,14 @@ function CreateNewTaskFormPage() {
     return <div>Loading...</div>;
   }
 
+  const navigationPayload = data.workflow_definition.parameters.find(
+    (parameter: WorkflowParameter) => parameter.key === "navigation_payload",
+  ).default_value;
+
+  const dataSchema = data.workflow_definition.blocks[0].data_schema;
+
+  const maxSteps = data.workflow_definition.blocks[0].max_steps_per_run;
+
   return (
     <SavedTaskForm
       initialValues={{
@@ -52,9 +61,9 @@ function CreateNewTaskFormPage() {
         navigationGoal: data.workflow_definition.blocks[0].navigation_goal,
         dataExtractionGoal:
           data.workflow_definition.blocks[0].data_extraction_goal,
-        extractedInformationSchema:
-          data.workflow_definition.blocks[0].data_schema,
-        navigationPayload: data.workflow_definition.parameters[0].default_value,
+        extractedInformationSchema: JSON.stringify(dataSchema, null, 2),
+        navigationPayload,
+        maxSteps,
       }}
     />
   );
