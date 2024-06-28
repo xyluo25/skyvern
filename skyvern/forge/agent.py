@@ -11,15 +11,20 @@ from playwright._impl._errors import TargetClosedError
 from playwright.async_api import Page
 
 from skyvern import analytics
+from skyvern.constants import SCRAPE_TYPE_ORDER, ScrapeType
 from skyvern.exceptions import (
     BrowserStateMissingPage,
+    EmptyScrapePage,
     FailedToNavigateToUrl,
     FailedToSendWebhook,
+    FailedToTakeScreenshot,
+    InvalidTaskStatusTransition,
     InvalidWorkflowTaskURLState,
     MissingBrowserStatePage,
     SkyvernException,
     StepTerminationError,
     StepUnableToExecuteError,
+    TaskAlreadyCanceled,
     TaskNotFound,
 )
 from skyvern.forge import app
@@ -201,6 +206,24 @@ class ForgeAgent:
         # if a download happens during the step execution.
         complete_on_download: bool = False,
     ) -> Tuple[Step, DetailedAgentStepOutput | None, Step | None]:
+        refreshed_task = await app.DATABASE.get_task(task_id=task.task_id, organization_id=organization.organization_id)
+        if refreshed_task:
+            task = refreshed_task
+
+        if task.status == TaskStatus.canceled:
+            LOG.info(
+                "Task is canceled, stopping execution",
+                task_id=task.task_id,
+            )
+            step = await self.update_step(
+                step,
+                status=StepStatus.canceled,
+                is_last=True,
+            )
+            # We don't send task response for now as the task is canceled
+            # TODO: shall we send task response here?
+            return step, None, None
+
         next_step: Step | None = None
         detailed_output: DetailedAgentStepOutput | None = None
         num_files_before = 0
@@ -345,14 +368,14 @@ class ForgeAgent:
                 step_id=step.step_id,
                 exc_info=True,
             )
-            await self.fail_task(task, step, e.message)
-            await self.send_task_response(
-                task=task,
-                last_step=step,
-                api_key=api_key,
-                close_browser_on_completion=close_browser_on_completion,
-                skip_cleanup=True,
-            )
+            is_task_marked_as_failed = await self.fail_task(task, step, e.message)
+            if is_task_marked_as_failed:
+                await self.send_task_response(
+                    task=task,
+                    last_step=step,
+                    api_key=api_key,
+                    close_browser_on_completion=close_browser_on_completion,
+                )
             return step, detailed_output, None
         except FailedToSendWebhook:
             LOG.exception(
@@ -373,15 +396,31 @@ class ForgeAgent:
                 error_message=e.error_message,
             )
             failure_reason = f"Failed to navigate to URL. URL:{e.url}, Error:{e.error_message}"
-            await self.fail_task(task, step, failure_reason)
-            await self.send_task_response(
-                task=task,
-                last_step=step,
-                api_key=api_key,
-                close_browser_on_completion=close_browser_on_completion,
-                skip_artifacts=True,
-            )
+            is_task_marked_as_failed = await self.fail_task(task, step, failure_reason)
+            if is_task_marked_as_failed:
+                await self.send_task_response(
+                    task=task,
+                    last_step=step,
+                    api_key=api_key,
+                    close_browser_on_completion=close_browser_on_completion,
+                    skip_artifacts=True,
+                )
             return step, detailed_output, next_step
+        except TaskAlreadyCanceled:
+            LOG.info(
+                "Task is already canceled, stopping execution",
+                task_id=task.task_id,
+            )
+            # We don't send task response for now as the task is canceled
+            return step, detailed_output, None
+        except InvalidTaskStatusTransition:
+            LOG.warning(
+                "Invalid task status transition",
+                task_id=task.task_id,
+                step_id=step.step_id,
+            )
+            # TODO: shall we send task response here?
+            return step, detailed_output, None
         except Exception as e:
             LOG.exception(
                 "Got an unexpected exception in step, fail the task",
@@ -393,29 +432,44 @@ class ForgeAgent:
             if isinstance(e, SkyvernException):
                 failure_reason = f"unexpected SkyvernException({e.__class__.__name__})"
 
-            await self.fail_task(task, step, failure_reason)
-            await self.send_task_response(
-                task=task,
-                last_step=step,
-                api_key=api_key,
-                close_browser_on_completion=close_browser_on_completion,
-            )
+            is_task_marked_as_failed = await self.fail_task(task, step, failure_reason)
+            if is_task_marked_as_failed:
+                await self.send_task_response(
+                    task=task,
+                    last_step=step,
+                    api_key=api_key,
+                    close_browser_on_completion=close_browser_on_completion,
+                )
             return step, detailed_output, None
 
-    async def fail_task(self, task: Task, step: Step | None, reason: str | None) -> None:
+    async def fail_task(self, task: Task, step: Step | None, reason: str | None) -> bool:
         try:
-            if step is not None and step.status.can_update_to(StepStatus.failed):
+            if step is not None:
                 await self.update_step(
                     step=step,
                     status=StepStatus.failed,
                 )
 
-            if task.status.can_update_to(TaskStatus.failed):
-                await self.update_task(
-                    task,
-                    status=TaskStatus.failed,
-                    failure_reason=reason,
-                )
+            await self.update_task(
+                task,
+                status=TaskStatus.failed,
+                failure_reason=reason,
+            )
+            return True
+        except TaskAlreadyCanceled:
+            LOG.info(
+                "Task is already canceled. Can't fail the task.",
+                task_id=task.task_id,
+                step_id=step.step_id if step else "",
+            )
+            return False
+        except InvalidTaskStatusTransition:
+            LOG.warning(
+                "Invalid task status transition while failing a task",
+                task_id=task.task_id,
+                step_id=step.step_id if step else "",
+            )
+            return False
         except Exception:
             LOG.exception(
                 "Failed to update status and failure reason in database. Task might going to be time_out",
@@ -423,6 +477,7 @@ class ForgeAgent:
                 step_id=step.step_id if step else "",
                 reason=reason,
             )
+            return True
 
     async def agent_step(
         self,
@@ -778,6 +833,37 @@ class ForgeAgent:
         )
         return step, browser_state, detailed_output
 
+    async def _scrape_with_type(
+        self,
+        task: Task,
+        step: Step,
+        browser_state: BrowserState,
+        scrape_type: ScrapeType,
+    ) -> ScrapedPage | None:
+        if scrape_type == ScrapeType.NORMAL:
+            pass
+
+        elif scrape_type == ScrapeType.STOPLOADING:
+            LOG.info(
+                "Try to stop loading the page before scraping",
+                task_id=task.task_id,
+                step_id=step.step_id,
+            )
+            await browser_state.stop_page_loading()
+        elif scrape_type == ScrapeType.RELOAD:
+            LOG.info(
+                "Try to reload the page before scraping",
+                task_id=task.task_id,
+                step_id=step.step_id,
+            )
+            await browser_state.reload_page()
+
+        return await scrape_website(
+            browser_state,
+            task.url,
+            scrape_exclude=app.scrape_exclude,
+        )
+
     async def _build_and_record_step_prompt(
         self,
         task: Task,
@@ -788,10 +874,30 @@ class ForgeAgent:
         self.async_operation_pool.run_operation(task.task_id, AgentPhase.scrape)
 
         # Scrape the web page and get the screenshot and the elements
-        scraped_page = await scrape_website(
-            browser_state,
-            task.url,
-        )
+        # HACK: try scrape_website three time to handle screenshot timeout
+        # first time: normal scrape to take screenshot
+        # second time: stop window loading before scraping
+        # third time: reload the page before scraping
+        scraped_page: ScrapedPage | None = None
+        for scrape_type in SCRAPE_TYPE_ORDER:
+            try:
+                scraped_page = await self._scrape_with_type(
+                    task=task, step=step, browser_state=browser_state, scrape_type=scrape_type
+                )
+                break
+            except FailedToTakeScreenshot as e:
+                if scrape_type == ScrapeType.RELOAD:
+                    LOG.error(
+                        "Failed to take screenshot after stop-loading and reload-page retry",
+                        task_id=task.task_id,
+                        step_id=step.step_id,
+                    )
+                    raise e
+                continue
+
+        if scraped_page is None:
+            raise EmptyScrapePage
+
         await app.ARTIFACT_MANAGER.create_artifact(
             step=step,
             artifact_type=ArtifactType.HTML_SCRAPE,
@@ -1240,6 +1346,11 @@ class ForgeAgent:
         extracted_information: dict[str, Any] | list | str | None = None,
         failure_reason: str | None = None,
     ) -> Task:
+        # refresh task from db to get the latest status
+        task_from_db = await app.DATABASE.get_task(task_id=task.task_id, organization_id=task.organization_id)
+        if task_from_db:
+            task = task_from_db
+
         task.validate_update(status, extracted_information, failure_reason)
         updates: dict[str, Any] = {}
         if status is not None:

@@ -165,6 +165,20 @@ class FailedToNavigateToUrl(SkyvernException):
         super().__init__(f"Failed to navigate to url {url}. Error message: {error_message}")
 
 
+class FailedToReloadPage(SkyvernException):
+    def __init__(self, url: str, error_message: str) -> None:
+        self.url = url
+        self.error_message = error_message
+        super().__init__(f"Failed to reload page url {url}. Error message: {error_message}")
+
+
+class FailedToStopLoadingPage(SkyvernException):
+    def __init__(self, url: str, error_message: str) -> None:
+        self.url = url
+        self.error_message = error_message
+        super().__init__(f"Failed to stop loading page url {url}. Error message: {error_message}")
+
+
 class UnexpectedTaskStatus(SkyvernException):
     def __init__(self, task_id: str, status: str) -> None:
         super().__init__(f"Unexpected task status {status} for task {task_id}")
@@ -216,6 +230,11 @@ class StepNotFound(SkyvernHTTPException):
 class FailedToTakeScreenshot(SkyvernException):
     def __init__(self, error_message: str) -> None:
         super().__init__(f"Failed to take screenshot. Error message: {error_message}")
+
+
+class EmptyScrapePage(SkyvernException):
+    def __init__(self) -> None:
+        super().__init__("Failed to scrape the page, returned an NONE result")
 
 
 class WorkflowRunContextNotInitialized(SkyvernException):
@@ -304,3 +323,42 @@ class InputActionOnSelect2Dropdown(SkyvernException):
         super().__init__(
             f"Input action on a select element, please try to use select action on this element. element_id={element_id}"
         )
+
+
+class FailToSelectByLabel(SkyvernException):
+    def __init__(self, element_id: str):
+        super().__init__(f"Failed to select by label. element_id={element_id}")
+
+
+class FailToSelectByIndex(SkyvernException):
+    def __init__(self, element_id: str):
+        super().__init__(f"Failed to select by index. element_id={element_id}")
+
+
+class OptionIndexOutOfBound(SkyvernException):
+    def __init__(self, element_id: str):
+        super().__init__(f"Option index is out of bound. element_id={element_id}")
+
+
+class FailToSelectByValue(SkyvernException):
+    def __init__(self, element_id: str):
+        super().__init__(f"Failed to select by value. element_id={element_id}")
+
+
+class EmptySelect(SkyvernException):
+    def __init__(self, element_id: str):
+        super().__init__(
+            f"nothing is selected, try to select again. element_id={element_id}",
+        )
+
+
+class TaskAlreadyCanceled(SkyvernHTTPException):
+    def __init__(self, new_status: str, task_id: str):
+        super().__init__(
+            f"Invalid task status transition to {new_status} for {task_id} because task is already canceled"
+        )
+
+
+class InvalidTaskStatusTransition(SkyvernHTTPException):
+    def __init__(self, old_status: str, new_status: str, task_id: str):
+        super().__init__(f"Invalid task status transition from {old_status} to {new_status} for {task_id}")

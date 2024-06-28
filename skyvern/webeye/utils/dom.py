@@ -79,11 +79,34 @@ class SkyvernElement:
             or (tag_name == "input" and "select2-input" in element_class)
         )
 
+    async def is_checkbox(self) -> bool:
+        tag_name = self.get_tag_name()
+        if tag_name != "input":
+            return False
+
+        button_type = await self.get_attr("type")
+        return button_type == "checkbox"
+
+    async def is_radio(self) -> bool:
+        tag_name = self.get_tag_name()
+        if tag_name != "input":
+            return False
+
+        button_type = await self.get_attr("type")
+        return button_type == "radio"
+
     def get_tag_name(self) -> str:
         return self.__static_element.get("tagName", "")
 
     def get_id(self) -> int | None:
         return self.__static_element.get("id")
+
+    def get_options(self) -> typing.List[SkyvernOptionType]:
+        options = self.__static_element.get("options", None)
+        if options is None:
+            return []
+
+        return typing.cast(typing.List[SkyvernOptionType], options)
 
     def find_element_id_in_label_children(self, element_type: InteractiveElement) -> str | None:
         tag_name = self.get_tag_name()

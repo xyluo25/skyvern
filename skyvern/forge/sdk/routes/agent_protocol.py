@@ -281,6 +281,22 @@ async def get_task(
     )
 
 
+@base_router.post("/tasks/{task_id}/cancel")
+@base_router.post("/tasks/{task_id}/cancel/", include_in_schema=False)
+async def cancel_task(
+    task_id: str,
+    current_org: Organization = Depends(org_auth_service.get_current_org),
+) -> None:
+    analytics.capture("skyvern-oss-agent-task-get")
+    task_obj = await app.DATABASE.get_task(task_id, organization_id=current_org.organization_id)
+    if not task_obj:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task not found {task_id}",
+        )
+    await app.agent.update_task(task_obj, status=TaskStatus.canceled)
+
+
 @base_router.post(
     "/tasks/{task_id}/retry_webhook",
     tags=["agent"],
@@ -638,16 +654,27 @@ async def delete_workflow(
 async def get_workflows(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1),
+    only_saved_tasks: bool = Query(False),
+    only_workflows: bool = Query(False),
     current_org: Organization = Depends(org_auth_service.get_current_org),
 ) -> list[Workflow]:
     """
     Get all workflows with the latest version for the organization.
     """
     analytics.capture("skyvern-oss-agent-workflows-get")
+
+    if only_saved_tasks and only_workflows:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="only_saved_tasks and only_workflows cannot be used together",
+        )
+
     return await app.WORKFLOW_SERVICE.get_workflows_by_organization_id(
         organization_id=current_org.organization_id,
         page=page,
         page_size=page_size,
+        only_saved_tasks=only_saved_tasks,
+        only_workflows=only_workflows,
     )
 
 
@@ -670,7 +697,7 @@ async def get_workflow(
 @base_router.post("/generate/task/")
 async def generate_task(
     data: GenerateTaskRequest,
-    current_org: Organization = Depends(org_auth_service.get_current_org_with_authentication),
+    current_org: Organization = Depends(org_auth_service.get_current_org),
 ) -> TaskGeneration:
     llm_prompt = prompt_engine.load_prompt("generate-task", user_prompt=data.prompt)
     try:

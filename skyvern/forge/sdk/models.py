@@ -15,13 +15,15 @@ class StepStatus(StrEnum):
     running = "running"
     failed = "failed"
     completed = "completed"
+    canceled = "canceled"
 
     def can_update_to(self, new_status: StepStatus) -> bool:
         allowed_transitions: dict[StepStatus, set[StepStatus]] = {
-            StepStatus.created: {StepStatus.running},
-            StepStatus.running: {StepStatus.completed, StepStatus.failed},
+            StepStatus.created: {StepStatus.running, StepStatus.canceled},
+            StepStatus.running: {StepStatus.completed, StepStatus.failed, StepStatus.canceled},
             StepStatus.failed: set(),
             StepStatus.completed: set(),
+            StepStatus.canceled: set(),
         }
         return new_status in allowed_transitions[self]
 
@@ -34,7 +36,7 @@ class StepStatus(StrEnum):
         return self in status_cant_have_output
 
     def is_terminal(self) -> bool:
-        status_is_terminal = {StepStatus.failed, StepStatus.completed}
+        status_is_terminal = {StepStatus.failed, StepStatus.completed, StepStatus.canceled}
         return self in status_is_terminal
 
 
@@ -63,6 +65,9 @@ class Step(BaseModel):
 
         if status and not old_status.can_update_to(status):
             raise ValueError(f"invalid_status_transition({old_status},{status},{self.step_id})")
+
+        if status == StepStatus.canceled:
+            return
 
         if status and status.requires_output() and output is None:
             raise ValueError(f"status_requires_output({status},{self.step_id})")
