@@ -1,9 +1,10 @@
 import dataclasses
 import json
+import time
+from asyncio import CancelledError
 from typing import Any
 
 import litellm
-import openai
 import structlog
 
 from skyvern.forge import app
@@ -12,8 +13,9 @@ from skyvern.forge.sdk.api.llm.exceptions import (
     DuplicateCustomLLMProviderError,
     InvalidLLMConfigError,
     LLMProviderError,
+    LLMProviderErrorRetryableTask,
 )
-from skyvern.forge.sdk.api.llm.models import LLMAPIHandler, LLMRouterConfig
+from skyvern.forge.sdk.api.llm.models import LLMAPIHandler, LLMConfig, LLMRouterConfig
 from skyvern.forge.sdk.api.llm.utils import llm_messages_builder, parse_api_response
 from skyvern.forge.sdk.artifact.models import ArtifactType
 from skyvern.forge.sdk.models import Step
@@ -44,6 +46,10 @@ class LLMAPIHandlerFactory:
             ),
             num_retries=llm_config.num_retries,
             retry_after=llm_config.retry_delay_seconds,
+            disable_cooldowns=llm_config.disable_cooldowns,
+            allowed_fails=llm_config.allowed_fails,
+            allowed_fails_policy=llm_config.allowed_fails_policy,
+            cooldown_time=llm_config.cooldown_time,
             set_verbose=(False if SettingsManager.get_settings().is_cloud_environment() else llm_config.set_verbose),
             enable_pre_call_checks=True,
         )
@@ -68,7 +74,7 @@ class LLMAPIHandlerFactory:
                 The response from the LLM router.
             """
             if parameters is None:
-                parameters = LLMAPIHandlerFactory.get_api_parameters()
+                parameters = LLMAPIHandlerFactory.get_api_parameters(llm_config)
 
             if step:
                 await app.ARTIFACT_MANAGER.create_artifact(
@@ -97,11 +103,17 @@ class LLMAPIHandlerFactory:
                     ).encode("utf-8"),
                 )
             try:
-                LOG.info("Calling LLM API", llm_key=llm_key, model=llm_config.model_name)
                 response = await router.acompletion(model=main_model_group, messages=messages, **parameters)
                 LOG.info("LLM API call successful", llm_key=llm_key, model=llm_config.model_name)
-            except openai.OpenAIError as e:
-                raise LLMProviderError(llm_key) from e
+            except litellm.exceptions.APIError as e:
+                raise LLMProviderErrorRetryableTask(llm_key) from e
+            except ValueError as e:
+                LOG.exception(
+                    "LLM token limit exceeded",
+                    llm_key=llm_key,
+                    model=main_model_group,
+                )
+                raise LLMProviderErrorRetryableTask(llm_key) from e
             except Exception as e:
                 LOG.exception(
                     "LLM request failed unexpectedly",
@@ -145,6 +157,8 @@ class LLMAPIHandlerFactory:
         if LLMConfigRegistry.is_router_config(llm_key):
             return LLMAPIHandlerFactory.get_llm_api_handler_with_router(llm_key)
 
+        assert isinstance(llm_config, LLMConfig)
+
         async def llm_api_handler(
             prompt: str,
             step: Step | None = None,
@@ -153,9 +167,11 @@ class LLMAPIHandlerFactory:
         ) -> dict[str, Any]:
             active_parameters = base_parameters or {}
             if parameters is None:
-                parameters = LLMAPIHandlerFactory.get_api_parameters()
+                parameters = LLMAPIHandlerFactory.get_api_parameters(llm_config)
 
             active_parameters.update(parameters)
+            if llm_config.litellm_params:  # type: ignore
+                active_parameters.update(llm_config.litellm_params)  # type: ignore
 
             if step:
                 await app.ARTIFACT_MANAGER.create_artifact(
@@ -188,6 +204,7 @@ class LLMAPIHandlerFactory:
                         }
                     ).encode("utf-8"),
                 )
+            t_llm_request = time.perf_counter()
             try:
                 # TODO (kerem): add a timeout to this call
                 # TODO (kerem): add a retry mechanism to this call (acompletion_with_retries)
@@ -200,8 +217,17 @@ class LLMAPIHandlerFactory:
                     **active_parameters,
                 )
                 LOG.info("LLM API call successful", llm_key=llm_key, model=llm_config.model_name)
-            except openai.OpenAIError as e:
-                raise LLMProviderError(llm_key) from e
+            except litellm.exceptions.APIError as e:
+                raise LLMProviderErrorRetryableTask(llm_key) from e
+            except CancelledError:
+                t_llm_cancelled = time.perf_counter()
+                LOG.error(
+                    "LLM request got cancelled",
+                    llm_key=llm_key,
+                    model=llm_config.model_name,
+                    duration=t_llm_cancelled - t_llm_request,
+                )
+                raise LLMProviderError(llm_key)
             except Exception as e:
                 LOG.exception("LLM request failed unexpectedly", llm_key=llm_key)
                 raise LLMProviderError(llm_key) from e
@@ -234,9 +260,9 @@ class LLMAPIHandlerFactory:
         return llm_api_handler
 
     @staticmethod
-    def get_api_parameters() -> dict[str, Any]:
+    def get_api_parameters(llm_config: LLMConfig | LLMRouterConfig) -> dict[str, Any]:
         return {
-            "max_tokens": SettingsManager.get_settings().LLM_CONFIG_MAX_TOKENS,
+            "max_tokens": llm_config.max_output_tokens,
             "temperature": SettingsManager.get_settings().LLM_CONFIG_TEMPERATURE,
         }
 

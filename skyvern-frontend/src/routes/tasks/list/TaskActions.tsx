@@ -41,6 +41,7 @@ import {
   TaskTemplateFormValues,
   taskTemplateFormSchema,
 } from "../create/TaskTemplateFormSchema";
+import { useNavigate } from "react-router-dom";
 
 function createTaskTemplateRequestObject(
   values: TaskTemplateFormValues,
@@ -49,6 +50,7 @@ function createTaskTemplateRequestObject(
   return {
     title: values.title,
     description: values.description,
+    is_saved_task: true,
     webhook_callback_url: task.request.webhook_callback_url,
     proxy_location: task.request.proxy_location,
     workflow_definition: {
@@ -88,6 +90,7 @@ function TaskActions({ task }: Props) {
   const [open, setOpen] = useState(false);
   const id = useId();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const credentialGetter = useCredentialGetter();
   const form = useForm<TaskTemplateFormValues>({
     resolver: zodResolver(taskTemplateFormSchema),
@@ -119,6 +122,7 @@ function TaskActions({ task }: Props) {
     },
     onSuccess: () => {
       toast({
+        variant: "success",
         title: "Template saved",
         description: "Template saved successfully",
       });
@@ -154,6 +158,13 @@ function TaskActions({ task }: Props) {
                 Save as Template
               </DropdownMenuItem>
             </DialogTrigger>
+            <DropdownMenuItem
+              onSelect={() => {
+                navigate(`/create/retry/${task.task_id}`);
+              }}
+            >
+              Rerun Task
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
         <DialogContent>

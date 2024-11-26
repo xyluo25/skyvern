@@ -7,16 +7,15 @@ import {
 import { StatusBadge } from "@/components/StatusBadge";
 import { Label } from "@/components/ui/label";
 import { useQuery } from "@tanstack/react-query";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ZoomableImage } from "@/components/ZoomableImage";
 import { Skeleton } from "@/components/ui/skeleton";
-import { JSONArtifact } from "./JSONArtifact";
-import { TextArtifact } from "./TextArtifact";
 import { getImageURL } from "./artifactUtils";
 import { Input } from "@/components/ui/input";
-import { basicTimeFormat } from "@/util/timeFormat";
+import { basicLocalTimeFormat, basicTimeFormat } from "@/util/timeFormat";
 import { useCredentialGetter } from "@/hooks/useCredentialGetter";
+import { Artifact } from "./Artifact";
 
 type Props = {
   id: string;
@@ -24,6 +23,8 @@ type Props = {
 };
 
 function StepArtifacts({ id, stepProps }: Props) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const artifact = searchParams.get("artifact") ?? "info";
   const { taskId } = useParams();
   const credentialGetter = useCredentialGetter();
   const {
@@ -53,33 +54,60 @@ function StepArtifacts({ id, stepProps }: Props) {
     (artifact) => artifact.artifact_type === ArtifactType.ActionScreenshot,
   );
 
-  const visibleElementsTreeTrimmed = artifacts?.find(
-    (artifact) =>
-      artifact.artifact_type === ArtifactType.VisibleElementsTreeTrimmed,
+  const visibleElementsTree = artifacts?.filter(
+    (artifact) => artifact.artifact_type === ArtifactType.VisibleElementsTree,
   );
 
-  const llmPrompt = artifacts?.find(
+  const llmRequest = artifacts?.filter(
+    (artifact) => artifact.artifact_type === ArtifactType.LLMRequest,
+  );
+
+  const visibleElementsTreeInPrompt = artifacts?.filter(
+    (artifact) =>
+      artifact.artifact_type === ArtifactType.VisibleElementsTreeInPrompt,
+  );
+
+  const llmPrompt = artifacts?.filter(
     (artifact) => artifact.artifact_type === ArtifactType.LLMPrompt,
   );
 
-  const llmResponseParsed = artifacts?.find(
+  const llmResponseParsed = artifacts?.filter(
     (artifact) => artifact.artifact_type === ArtifactType.LLMResponseParsed,
   );
 
-  const htmlRaw = artifacts?.find(
+  const htmlRaw = artifacts?.filter(
     (artifact) => artifact.artifact_type === ArtifactType.HTMLScrape,
   );
 
   return (
-    <Tabs defaultValue="info" className="w-full">
-      <TabsList className="grid w-full h-16 grid-cols-4">
+    <Tabs
+      value={artifact}
+      onValueChange={(value) => {
+        setSearchParams(
+          (params) => {
+            const newParams = new URLSearchParams(params);
+            newParams.set("artifact", value);
+            return newParams;
+          },
+          {
+            replace: true,
+          },
+        );
+      }}
+      className="w-full"
+    >
+      <TabsList className="grid h-16 w-full grid-cols-5">
         <TabsTrigger value="info">Info</TabsTrigger>
         <TabsTrigger value="screenshot_llm">Annotated Screenshots</TabsTrigger>
         <TabsTrigger value="screenshot_action">Action Screenshots</TabsTrigger>
-        <TabsTrigger value="element_tree_trimmed">Element Tree</TabsTrigger>
+        <TabsTrigger value="element_tree_trimmed">
+          HTML Element Tree
+        </TabsTrigger>
+        <TabsTrigger value="element_tree">Element Tree</TabsTrigger>
         <TabsTrigger value="llm_prompt">Prompt</TabsTrigger>
         <TabsTrigger value="llm_response_parsed">Action List</TabsTrigger>
         <TabsTrigger value="html_raw">HTML (Raw)</TabsTrigger>
+        <TabsTrigger value="llm_request">LLM Request (Raw)</TabsTrigger>
       </TabsList>
       <TabsContent value="info">
         <div className="flex flex-col gap-6 p-4">
@@ -104,7 +132,11 @@ function StepArtifacts({ id, stepProps }: Props) {
             {isFetching ? (
               <Skeleton className="h-4 w-40" />
             ) : stepProps ? (
-              <Input value={basicTimeFormat(stepProps.created_at)} readOnly />
+              <Input
+                value={basicLocalTimeFormat(stepProps.created_at)}
+                readOnly
+                title={basicTimeFormat(stepProps.created_at)}
+              />
             ) : null}
           </div>
         </div>
@@ -116,16 +148,16 @@ function StepArtifacts({ id, stepProps }: Props) {
               <ZoomableImage
                 key={index}
                 src={getImageURL(artifact)}
-                className="object-cover w-full h-full"
+                className="h-full w-full object-cover"
                 alt="action-screenshot"
               />
             ))}
           </div>
         ) : isFetching ? (
           <div className="grid grid-cols-2 gap-4 p-4">
-            <Skeleton className="w-full h-full" />
-            <Skeleton className="w-full h-full" />
-            <Skeleton className="w-full h-full" />
+            <Skeleton className="h-full w-full" />
+            <Skeleton className="h-full w-full" />
+            <Skeleton className="h-full w-full" />
           </div>
         ) : (
           <div>No screenshots found</div>
@@ -138,36 +170,44 @@ function StepArtifacts({ id, stepProps }: Props) {
               <ZoomableImage
                 key={index}
                 src={getImageURL(artifact)}
-                className="object-cover w-full h-full"
+                className="h-full w-full object-cover"
                 alt="action-screenshot"
               />
             ))}
           </div>
         ) : isFetching ? (
           <div className="grid grid-cols-3 gap-4 p-4">
-            <Skeleton className="w-full h-full" />
-            <Skeleton className="w-full h-full" />
-            <Skeleton className="w-full h-full" />
+            <Skeleton className="h-full w-full" />
+            <Skeleton className="h-full w-full" />
+            <Skeleton className="h-full w-full" />
           </div>
         ) : (
           <div>No screenshots found</div>
         )}
       </TabsContent>
       <TabsContent value="element_tree_trimmed">
-        {visibleElementsTreeTrimmed ? (
-          <JSONArtifact artifact={visibleElementsTreeTrimmed} />
+        {visibleElementsTreeInPrompt ? (
+          <Artifact type="html" artifacts={visibleElementsTreeInPrompt} />
+        ) : null}
+      </TabsContent>
+      <TabsContent value="element_tree">
+        {visibleElementsTree ? (
+          <Artifact type="json" artifacts={visibleElementsTree} />
         ) : null}
       </TabsContent>
       <TabsContent value="llm_prompt">
-        {llmPrompt ? <TextArtifact artifact={llmPrompt} /> : null}
+        {llmPrompt ? <Artifact type="text" artifacts={llmPrompt} /> : null}
       </TabsContent>
       <TabsContent value="llm_response_parsed">
         {llmResponseParsed ? (
-          <JSONArtifact artifact={llmResponseParsed} />
+          <Artifact type="json" artifacts={llmResponseParsed} />
         ) : null}
       </TabsContent>
       <TabsContent value="html_raw">
-        {htmlRaw ? <TextArtifact artifact={htmlRaw} /> : null}
+        {htmlRaw ? <Artifact type="html" artifacts={htmlRaw} /> : null}
+      </TabsContent>
+      <TabsContent value="llm_request">
+        {llmRequest ? <Artifact type="json" artifacts={llmRequest} /> : null}
       </TabsContent>
     </Tabs>
   );

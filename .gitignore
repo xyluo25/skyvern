@@ -165,9 +165,19 @@ traces/
 *.pkl
 har/
 postgres-data
+files/
+temp/
 
 # Streamlit ignores
 **/secrets*.toml
 
 ## Frontend
 node_modules
+.env.backup
+.env.old
+
+# ctags
+tags
+tags.lock
+tags.temp
+tags.temp.tmp

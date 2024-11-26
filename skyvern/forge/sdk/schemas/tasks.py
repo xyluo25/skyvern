@@ -4,9 +4,11 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, HttpUrl, field_validator
 
-from skyvern.exceptions import InvalidTaskStatusTransition, TaskAlreadyCanceled
+from skyvern.exceptions import BlockedHost, InvalidTaskStatusTransition, TaskAlreadyCanceled
+from skyvern.forge.sdk.core.validators import is_blocked_host
+from skyvern.forge.sdk.db.enums import TaskType
 
 
 class ProxyLocation(StrEnum):
@@ -17,10 +19,14 @@ class ProxyLocation(StrEnum):
     US_WA = "US-WA"
     RESIDENTIAL = "RESIDENTIAL"
     RESIDENTIAL_ES = "RESIDENTIAL_ES"
+    RESIDENTIAL_IE = "RESIDENTIAL_IE"
+    RESIDENTIAL_GB = "RESIDENTIAL_GB"
+    RESIDENTIAL_IN = "RESIDENTIAL_IN"
+    RESIDENTIAL_JP = "RESIDENTIAL_JP"
     NONE = "NONE"
 
 
-class TaskRequest(BaseModel):
+class TaskBase(BaseModel):
     title: str | None = Field(
         default=None,
         description="The title of the task.",
@@ -28,16 +34,16 @@ class TaskRequest(BaseModel):
     )
     url: str = Field(
         ...,
-        min_length=1,
         description="Starting URL for the task.",
         examples=["https://www.geico.com"],
     )
-    # TODO: use HttpUrl instead of str
     webhook_callback_url: str | None = Field(
         default=None,
         description="The URL to call when the task is completed.",
         examples=["https://my-webhook.com"],
     )
+    totp_verification_url: str | None = None
+    totp_identifier: str | None = None
     navigation_goal: str | None = Field(
         default=None,
         description="The user's goal for the task.",
@@ -72,6 +78,44 @@ class TaskRequest(BaseModel):
         default=None,
         description="The requested schema of the extracted information.",
     )
+    complete_criterion: str | None = Field(
+        default=None, description="Criterion to complete", examples=["Complete if 'hello world' shows up on the page"]
+    )
+    terminate_criterion: str | None = Field(
+        default=None,
+        description="Criterion to terminate",
+        examples=["Terminate if 'existing account' shows up on the page"],
+    )
+    task_type: TaskType | None = Field(
+        default=TaskType.general,
+        description="The type of the task",
+        examples=[TaskType.general, TaskType.validation],
+    )
+
+
+class TaskRequest(TaskBase):
+    url: HttpUrl = Field(
+        ...,
+        description="Starting URL for the task.",
+        examples=["https://www.geico.com"],
+    )
+    webhook_callback_url: HttpUrl | None = Field(
+        default=None,
+        description="The URL to call when the task is completed.",
+        examples=["https://my-webhook.com"],
+    )
+    totp_verification_url: HttpUrl | None = None
+
+    @field_validator("url", "webhook_callback_url", "totp_verification_url")
+    @classmethod
+    def validate_urls(cls, v: HttpUrl | None) -> HttpUrl | None:
+        if not v or not v.host:
+            return None
+        host = v.host
+        blocked = is_blocked_host(host)
+        if blocked:
+            raise BlockedHost(host=host)
+        return v
 
 
 class TaskStatus(StrEnum):
@@ -142,7 +186,7 @@ class TaskStatus(StrEnum):
         return self in status_requires_failure_reason
 
 
-class Task(TaskRequest):
+class Task(TaskBase):
     created_at: datetime = Field(
         ...,
         description="The creation datetime of the task.",
@@ -207,6 +251,7 @@ class Task(TaskRequest):
         action_screenshot_urls: list[str] | None = None,
         screenshot_url: str | None = None,
         recording_url: str | None = None,
+        browser_console_log_url: str | None = None,
         failure_reason: str | None = None,
     ) -> TaskResponse:
         return TaskResponse(
@@ -220,12 +265,15 @@ class Task(TaskRequest):
             action_screenshot_urls=action_screenshot_urls,
             screenshot_url=screenshot_url,
             recording_url=recording_url,
+            browser_console_log_url=browser_console_log_url,
             errors=self.errors,
+            max_steps_per_run=self.max_steps_per_run,
+            workflow_run_id=self.workflow_run_id,
         )
 
 
 class TaskResponse(BaseModel):
-    request: TaskRequest
+    request: TaskBase
     task_id: str
     status: TaskStatus
     created_at: datetime
@@ -234,8 +282,11 @@ class TaskResponse(BaseModel):
     action_screenshot_urls: list[str] | None = None
     screenshot_url: str | None = None
     recording_url: str | None = None
+    browser_console_log_url: str | None = None
     failure_reason: str | None = None
     errors: list[dict[str, Any]] = []
+    max_steps_per_run: int | None = None
+    workflow_run_id: str | None = None
 
 
 class TaskOutput(BaseModel):
@@ -258,3 +309,13 @@ class TaskOutput(BaseModel):
 
 class CreateTaskResponse(BaseModel):
     task_id: str
+
+
+class OrderBy(StrEnum):
+    created_at = "created_at"
+    modified_at = "modified_at"
+
+
+class SortDirection(StrEnum):
+    asc = "asc"
+    desc = "desc"

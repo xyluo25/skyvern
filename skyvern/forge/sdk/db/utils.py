@@ -10,6 +10,7 @@ from skyvern.forge.sdk.db.models import (
     ArtifactModel,
     AWSSecretParameterModel,
     BitwardenLoginCredentialParameterModel,
+    BitwardenSensitiveInformationParameterModel,
     OrganizationAuthTokenModel,
     OrganizationModel,
     OutputParameterModel,
@@ -26,6 +27,7 @@ from skyvern.forge.sdk.schemas.tasks import ProxyLocation, Task, TaskStatus
 from skyvern.forge.sdk.workflow.models.parameter import (
     AWSSecretParameter,
     BitwardenLoginCredentialParameter,
+    BitwardenSensitiveInformationParameter,
     OutputParameter,
     WorkflowParameter,
     WorkflowParameterType,
@@ -58,9 +60,14 @@ def convert_to_task(task_obj: TaskModel, debug_enabled: bool = False) -> Task:
         status=TaskStatus(task_obj.status),
         created_at=task_obj.created_at,
         modified_at=task_obj.modified_at,
+        task_type=task_obj.task_type,
         title=task_obj.title,
         url=task_obj.url,
+        complete_criterion=task_obj.complete_criterion,
+        terminate_criterion=task_obj.terminate_criterion,
         webhook_callback_url=task_obj.webhook_callback_url,
+        totp_verification_url=task_obj.totp_verification_url,
+        totp_identifier=task_obj.totp_identifier,
         navigation_goal=task_obj.navigation_goal,
         data_extraction_goal=task_obj.data_extraction_goal,
         navigation_payload=task_obj.navigation_payload,
@@ -107,6 +114,8 @@ def convert_to_organization(org_model: OrganizationModel) -> Organization:
         max_steps_per_run=org_model.max_steps_per_run,
         max_retries_per_step=org_model.max_retries_per_step,
         domain=org_model.domain,
+        bw_organization_id=org_model.bw_organization_id,
+        bw_collection_ids=org_model.bw_collection_ids,
         created_at=org_model.created_at,
         modified_at=org_model.modified_at,
     )
@@ -158,6 +167,9 @@ def convert_to_workflow(workflow_model: WorkflowModel, debug_enabled: bool = Fal
         title=workflow_model.title,
         workflow_permanent_id=workflow_model.workflow_permanent_id,
         webhook_callback_url=workflow_model.webhook_callback_url,
+        totp_verification_url=workflow_model.totp_verification_url,
+        totp_identifier=workflow_model.totp_identifier,
+        persist_browser_session=workflow_model.persist_browser_session,
         proxy_location=(ProxyLocation(workflow_model.proxy_location) if workflow_model.proxy_location else None),
         version=workflow_model.version,
         is_saved_task=workflow_model.is_saved_task,
@@ -178,12 +190,17 @@ def convert_to_workflow_run(workflow_run_model: WorkflowRunModel, debug_enabled:
 
     return WorkflowRun(
         workflow_run_id=workflow_run_model.workflow_run_id,
+        workflow_permanent_id=workflow_run_model.workflow_permanent_id,
         workflow_id=workflow_run_model.workflow_id,
+        organization_id=workflow_run_model.organization_id,
         status=WorkflowRunStatus[workflow_run_model.status],
+        failure_reason=workflow_run_model.failure_reason,
         proxy_location=(
             ProxyLocation(workflow_run_model.proxy_location) if workflow_run_model.proxy_location else None
         ),
         webhook_callback_url=workflow_run_model.webhook_callback_url,
+        totp_verification_url=workflow_run_model.totp_verification_url,
+        totp_identifier=workflow_run_model.totp_identifier,
         created_at=workflow_run_model.created_at,
         modified_at=workflow_run_model.modified_at,
     )
@@ -258,6 +275,33 @@ def convert_to_bitwarden_login_credential_parameter(
         created_at=bitwarden_login_credential_parameter_model.created_at,
         modified_at=bitwarden_login_credential_parameter_model.modified_at,
         deleted_at=bitwarden_login_credential_parameter_model.deleted_at,
+    )
+
+
+def convert_to_bitwarden_sensitive_information_parameter(
+    bitwarden_sensitive_information_parameter_model: BitwardenSensitiveInformationParameterModel,
+    debug_enabled: bool = False,
+) -> BitwardenSensitiveInformationParameter:
+    if debug_enabled:
+        LOG.debug(
+            "Converting BitwardenSensitiveInformationParameterModel to BitwardenSensitiveInformationParameter",
+            bitwarden_sensitive_information_parameter_id=bitwarden_sensitive_information_parameter_model.bitwarden_sensitive_information_parameter_id,
+        )
+
+    return BitwardenSensitiveInformationParameter(
+        bitwarden_sensitive_information_parameter_id=bitwarden_sensitive_information_parameter_model.bitwarden_sensitive_information_parameter_id,
+        workflow_id=bitwarden_sensitive_information_parameter_model.workflow_id,
+        key=bitwarden_sensitive_information_parameter_model.key,
+        description=bitwarden_sensitive_information_parameter_model.description,
+        bitwarden_client_id_aws_secret_key=bitwarden_sensitive_information_parameter_model.bitwarden_client_id_aws_secret_key,
+        bitwarden_client_secret_aws_secret_key=bitwarden_sensitive_information_parameter_model.bitwarden_client_secret_aws_secret_key,
+        bitwarden_master_password_aws_secret_key=bitwarden_sensitive_information_parameter_model.bitwarden_master_password_aws_secret_key,
+        bitwarden_collection_id=bitwarden_sensitive_information_parameter_model.bitwarden_collection_id,
+        bitwarden_identity_key=bitwarden_sensitive_information_parameter_model.bitwarden_identity_key,
+        bitwarden_identity_fields=bitwarden_sensitive_information_parameter_model.bitwarden_identity_fields,
+        created_at=bitwarden_sensitive_information_parameter_model.created_at,
+        modified_at=bitwarden_sensitive_information_parameter_model.modified_at,
+        deleted_at=bitwarden_sensitive_information_parameter_model.deleted_at,
     )
 
 

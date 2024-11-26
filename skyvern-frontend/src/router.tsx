@@ -1,18 +1,24 @@
-import { Navigate, createBrowserRouter } from "react-router-dom";
+import { Navigate, Outlet, createBrowserRouter } from "react-router-dom";
 import { RootLayout } from "./routes/root/RootLayout";
-import { TasksPageLayout } from "./routes/tasks/TasksPageLayout";
-import { TaskTemplates } from "./routes/tasks/create/TaskTemplates";
-import { TaskList } from "./routes/tasks/list/TaskList";
 import { Settings } from "./routes/settings/Settings";
 import { SettingsPageLayout } from "./routes/settings/SettingsPageLayout";
-import { TaskDetails } from "./routes/tasks/detail/TaskDetails";
-import { CreateNewTaskLayout } from "./routes/tasks/create/CreateNewTaskLayout";
+import { TasksPageLayout } from "./routes/tasks/TasksPageLayout";
 import { CreateNewTaskFormPage } from "./routes/tasks/create/CreateNewTaskFormPage";
-import { TaskActions } from "./routes/tasks/detail/TaskActions";
-import { TaskRecording } from "./routes/tasks/detail/TaskRecording";
-import { TaskParameters } from "./routes/tasks/detail/TaskParameters";
+import { CreateNewTaskLayout } from "./routes/tasks/create/CreateNewTaskLayout";
+import { TaskTemplates } from "./routes/tasks/create/TaskTemplates";
+import { RetryTask } from "./routes/tasks/create/retry/RetryTask";
 import { StepArtifactsLayout } from "./routes/tasks/detail/StepArtifactsLayout";
-import { CreateNewTaskFromPrompt } from "./routes/tasks/create/CreateNewTaskFromPrompt";
+import { TaskActions } from "./routes/tasks/detail/TaskActions";
+import { TaskDetails } from "./routes/tasks/detail/TaskDetails";
+import { TaskParameters } from "./routes/tasks/detail/TaskParameters";
+import { TaskRecording } from "./routes/tasks/detail/TaskRecording";
+import { TaskList } from "./routes/tasks/list/TaskList";
+import { WorkflowPage } from "./routes/workflows/WorkflowPage";
+import { WorkflowRun } from "./routes/workflows/WorkflowRun";
+import { WorkflowRunParameters } from "./routes/workflows/WorkflowRunParameters";
+import { Workflows } from "./routes/workflows/Workflows";
+import { WorkflowsPageLayout } from "./routes/workflows/WorkflowsPageLayout";
+import { WorkflowEditor } from "./routes/workflows/editor/WorkflowEditor";
 
 const router = createBrowserRouter([
   {
@@ -68,12 +74,48 @@ const router = createBrowserRouter([
             element: <TaskTemplates />,
           },
           {
-            path: "sk-prompt",
-            element: <CreateNewTaskFromPrompt />,
-          },
-          {
             path: ":template",
             element: <CreateNewTaskFormPage />,
+          },
+          {
+            path: "retry/:taskId",
+            element: <RetryTask />,
+          },
+        ],
+      },
+      {
+        path: "workflows",
+        element: <WorkflowsPageLayout />,
+        children: [
+          {
+            index: true,
+            element: <Workflows />,
+          },
+          {
+            path: ":workflowPermanentId",
+            element: <Outlet />,
+            children: [
+              {
+                index: true,
+                element: <Navigate to="runs" />,
+              },
+              {
+                path: "edit",
+                element: <WorkflowEditor />,
+              },
+              {
+                path: "run",
+                element: <WorkflowRunParameters />,
+              },
+              {
+                path: "runs",
+                element: <WorkflowPage />,
+              },
+              {
+                path: ":workflowRunId",
+                element: <WorkflowRun />,
+              },
+            ],
           },
         ],
       },

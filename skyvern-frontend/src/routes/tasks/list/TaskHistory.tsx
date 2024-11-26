@@ -22,7 +22,7 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 import { StatusBadge } from "@/components/StatusBadge";
-import { basicTimeFormat } from "@/util/timeFormat";
+import { basicLocalTimeFormat, basicTimeFormat } from "@/util/timeFormat";
 import { cn } from "@/util/utils";
 import { TaskActions } from "./TaskActions";
 
@@ -49,6 +49,7 @@ function TaskHistory() {
       params.append("task_status", "terminated");
       params.append("task_status", "timed_out");
       params.append("task_status", "canceled");
+      params.append("only_standalone_tasks", "true");
 
       return client
         .get("/tasks", {
@@ -92,7 +93,7 @@ function TaskHistory() {
               <TaskListSkeletonRows />
             ) : tasks?.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={3}>No tasks found</TableCell>
+                <TableCell colSpan={5}>No tasks found</TableCell>
               </TableRow>
             ) : (
               tasks?.map((task) => {
@@ -105,7 +106,7 @@ function TaskHistory() {
                       {task.task_id}
                     </TableCell>
                     <TableCell
-                      className="w-1/4 cursor-pointer max-w-64 overflow-hidden whitespace-nowrap overflow-ellipsis"
+                      className="w-1/4 max-w-64 cursor-pointer overflow-hidden overflow-ellipsis whitespace-nowrap"
                       onClick={(event) => handleNavigate(event, task.task_id)}
                     >
                       {task.request.url}
@@ -119,8 +120,9 @@ function TaskHistory() {
                     <TableCell
                       className="w-1/4 cursor-pointer"
                       onClick={(event) => handleNavigate(event, task.task_id)}
+                      title={basicTimeFormat(task.created_at)}
                     >
-                      {basicTimeFormat(task.created_at)}
+                      {basicLocalTimeFormat(task.created_at)}
                     </TableCell>
                     <TableCell className="w-1/12">
                       <TaskActions task={task} />
@@ -137,7 +139,6 @@ function TaskHistory() {
         <PaginationContent>
           <PaginationItem>
             <PaginationPrevious
-              href="#"
               className={cn({ "cursor-not-allowed": page === 1 })}
               onClick={() => {
                 if (page === 1) {
@@ -145,20 +146,19 @@ function TaskHistory() {
                 }
                 const params = new URLSearchParams();
                 params.set("page", String(Math.max(1, page - 1)));
-                setSearchParams(params);
+                setSearchParams(params, { replace: true });
               }}
             />
           </PaginationItem>
           <PaginationItem>
-            <PaginationLink href="#">{page}</PaginationLink>
+            <PaginationLink>{page}</PaginationLink>
           </PaginationItem>
           <PaginationItem>
             <PaginationNext
-              href="#"
               onClick={() => {
                 const params = new URLSearchParams();
                 params.set("page", String(page + 1));
-                setSearchParams(params);
+                setSearchParams(params, { replace: true });
               }}
             />
           </PaginationItem>

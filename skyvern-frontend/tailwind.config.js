@@ -12,12 +12,16 @@ module.exports = {
     container: {
       center: true,
       padding: "2rem",
-      screens: {
-        "2xl": "1400px",
-      },
     },
     extend: {
       colors: {
+        slate: {
+          elevation1: "hsl(var(--slate-elevation-1))",
+          elevation2: "hsl(var(--slate-elevation-2))",
+          elevation3: "hsl(var(--slate-elevation-3))",
+          elevation4: "hsl(var(--slate-elevation-4))",
+          elevation5: "hsl(var(--slate-elevation-5))",
+        },
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
@@ -30,6 +34,10 @@ module.exports = {
         secondary: {
           DEFAULT: "hsl(var(--secondary))",
           foreground: "hsl(var(--secondary-foreground))",
+        },
+        tertiary: {
+          DEFAULT: "hsl(var(--tertiary))",
+          foreground: "hsl(var(--tertiary-foreground))",
         },
         destructive: {
           DEFAULT: "hsl(var(--destructive))",

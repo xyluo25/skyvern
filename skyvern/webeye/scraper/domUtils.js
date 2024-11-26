@@ -1,3 +1,6 @@
+// we only use chromium browser for now
+let browserNameForWorkarounds = "chromium";
+
 // Commands for manipulating rects.
 // Want to debug this? Run chromium, go to sources, and create a new snippet with the code in domUtils.js
 class Rect {
@@ -197,26 +200,63 @@ function getElementComputedStyle(element, pseudo) {
     : undefined;
 }
 
-// from playwright
+// from playwright: https://github.com/microsoft/playwright/blob/1b65f26f0287c0352e76673bc5f85bc36c934b55/packages/playwright-core/src/server/injected/domUtils.ts#L76-L98
 function isElementStyleVisibilityVisible(element, style) {
   style = style ?? getElementComputedStyle(element);
   if (!style) return true;
+  // Element.checkVisibility checks for content-visibility and also looks at
+  // styles up the flat tree including user-agent ShadowRoots, such as the
+  // details element for example.
+  // All the browser implement it, but WebKit has a bug which prevents us from using it:
+  // https://bugs.webkit.org/show_bug.cgi?id=264733
+  // @ts-ignore
   if (
-    !element.checkVisibility({ checkOpacity: false, checkVisibilityCSS: false })
-  )
-    return false;
+    Element.prototype.checkVisibility &&
+    browserNameForWorkarounds !== "webkit"
+  ) {
+    if (!element.checkVisibility()) return false;
+  } else {
+    // Manual workaround for WebKit that does not have checkVisibility.
+    const detailsOrSummary = element.closest("details,summary");
+    if (
+      detailsOrSummary !== element &&
+      detailsOrSummary?.nodeName === "DETAILS" &&
+      !detailsOrSummary.open
+    )
+      return false;
+  }
   if (style.visibility !== "visible") return false;
+
+  // TODO: support style.clipPath and style.clipRule?
+  // if element is clipped with rect(0px, 0px, 0px, 0px), it means it's invisible on the page
+  if (style.clip === "rect(0px, 0px, 0px, 0px)") {
+    return false;
+  }
+
   return true;
 }
 
-// from playwright
+function hasASPClientControl() {
+  return typeof ASPxClientControl !== "undefined";
+}
+
+// from playwright: https://github.com/microsoft/playwright/blob/1b65f26f0287c0352e76673bc5f85bc36c934b55/packages/playwright-core/src/server/injected/domUtils.ts#L100-L119
 function isElementVisible(element) {
   // TODO: This is a hack to not check visibility for option elements
   // because they are not visible by default. We check their parent instead for visibility.
-  if (element.tagName.toLowerCase() === "option")
+  if (
+    element.tagName.toLowerCase() === "option" ||
+    (element.tagName.toLowerCase() === "input" &&
+      (element.type === "radio" || element.type === "checkbox"))
+  )
     return element.parentElement && isElementVisible(element.parentElement);
 
-  if (element.className.toString().includes("select2-offscreen")) {
+  const className = element.className ? element.className.toString() : "";
+  if (
+    className.includes("select2-offscreen") ||
+    className.includes("select2-hidden") ||
+    className.includes("ui-select-offscreen")
+  ) {
     return false;
   }
 
@@ -230,7 +270,8 @@ function isElementVisible(element) {
         isElementVisible(child)
       )
         return true;
-      // skipping other nodes including text
+      if (child.nodeType === 3 /* Node.TEXT_NODE */ && isVisibleTextNode(child))
+        return true;
     }
     return false;
   }
@@ -240,19 +281,176 @@ function isElementVisible(element) {
     return false;
   }
 
-  // if the center point of the element is not in the page, we tag it as an interactable element
-  const center_x = (rect.left + rect.width) / 2;
-  const center_y = (rect.top + rect.height) / 2;
-  if (center_x < 0 || center_y < 0) {
+  // if the center point of the element is not in the page, we tag it as an non-interactable element
+  // FIXME: sometimes there could be an overflow element blocking the default scrolling, making Y coordinate be wrong. So we currently only check for X
+  const center_x = (rect.left + rect.width) / 2 + window.scrollX;
+  if (center_x < 0) {
     return false;
   }
+  // const center_y = (rect.top + rect.height) / 2 + window.scrollY;
+  // if (center_x < 0 || center_y < 0) {
+  //   return false;
+  // }
 
   return true;
 }
 
+// from playwright: https://github.com/microsoft/playwright/blob/1b65f26f0287c0352e76673bc5f85bc36c934b55/packages/playwright-core/src/server/injected/domUtils.ts#L121-L127
+function isVisibleTextNode(node) {
+  // https://stackoverflow.com/questions/1461059/is-there-an-equivalent-to-getboundingclientrect-for-text-nodes
+  const range = node.ownerDocument.createRange();
+  range.selectNode(node);
+  const rect = range.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) {
+    return false;
+  }
+
+  // if the center point of the element is not in the page, we tag it as an non-interactable element
+  // FIXME: sometimes there could be an overflow element blocking the default scrolling, making Y coordinate be wrong. So we currently only check for X
+  const center_x = (rect.left + rect.width) / 2 + window.scrollX;
+  if (center_x < 0) {
+    return false;
+  }
+  // const center_y = (rect.top + rect.height) / 2 + window.scrollY;
+  // if (center_x < 0 || center_y < 0) {
+  //   return false;
+  // }
+  return true;
+}
+
+// from playwright: https://github.com/microsoft/playwright/blob/d685763c491e06be38d05675ef529f5c230388bb/packages/playwright-core/src/server/injected/domUtils.ts#L37-L44
+function parentElementOrShadowHost(element) {
+  if (element.parentElement) return element.parentElement;
+  if (!element.parentNode) return;
+  if (
+    element.parentNode.nodeType === 11 /* Node.DOCUMENT_FRAGMENT_NODE */ &&
+    element.parentNode.host
+  )
+    return element.parentNode.host;
+}
+
+// from playwright: https://github.com/microsoft/playwright/blob/d685763c491e06be38d05675ef529f5c230388bb/packages/playwright-core/src/server/injected/domUtils.ts#L46-L52
+function enclosingShadowRootOrDocument(element) {
+  let node = element;
+  while (node.parentNode) node = node.parentNode;
+  if (
+    node.nodeType === 11 /* Node.DOCUMENT_FRAGMENT_NODE */ ||
+    node.nodeType === 9 /* Node.DOCUMENT_NODE */
+  )
+    return node;
+}
+
+// from playwright: https://github.com/microsoft/playwright/blob/d685763c491e06be38d05675ef529f5c230388bb/packages/playwright-core/src/server/injected/injectedScript.ts#L799-L859
+function expectHitTarget(hitPoint, targetElement) {
+  const roots = [];
+
+  // Get all component roots leading to the target element.
+  // Go from the bottom to the top to make it work with closed shadow roots.
+  let parentElement = targetElement;
+  while (parentElement) {
+    const root = enclosingShadowRootOrDocument(parentElement);
+    if (!root) break;
+    roots.push(root);
+    if (root.nodeType === 9 /* Node.DOCUMENT_NODE */) break;
+    parentElement = root.host;
+  }
+
+  // Hit target in each component root should point to the next component root.
+  // Hit target in the last component root should point to the target or its descendant.
+  let hitElement;
+  for (let index = roots.length - 1; index >= 0; index--) {
+    const root = roots[index];
+    // All browsers have different behavior around elementFromPoint and elementsFromPoint.
+    // https://github.com/w3c/csswg-drafts/issues/556
+    // http://crbug.com/1188919
+    const elements = root.elementsFromPoint(hitPoint.x, hitPoint.y);
+    const singleElement = root.elementFromPoint(hitPoint.x, hitPoint.y);
+    if (
+      singleElement &&
+      elements[0] &&
+      parentElementOrShadowHost(singleElement) === elements[0]
+    ) {
+      const style = window.getComputedStyle(singleElement);
+      if (style?.display === "contents") {
+        // Workaround a case where elementsFromPoint misses the inner-most element with display:contents.
+        // https://bugs.chromium.org/p/chromium/issues/detail?id=1342092
+        elements.unshift(singleElement);
+      }
+    }
+    if (
+      elements[0] &&
+      elements[0].shadowRoot === root &&
+      elements[1] === singleElement
+    ) {
+      // Workaround webkit but where first two elements are swapped:
+      // <host>
+      //   #shadow root
+      //     <target>
+      // elementsFromPoint produces [<host>, <target>], while it should be [<target>, <host>]
+      // In this case, just ignore <host>.
+      elements.shift();
+    }
+    const innerElement = elements[0];
+    if (!innerElement) break;
+    hitElement = innerElement;
+    if (index && innerElement !== roots[index - 1].host) break;
+  }
+
+  // Check whether hit target is the target or its descendant.
+  const hitParents = [];
+  while (hitElement && hitElement !== targetElement) {
+    hitParents.push(hitElement);
+    hitElement = parentElementOrShadowHost(hitElement);
+  }
+  if (hitElement === targetElement) return null;
+
+  return hitParents[0] || document.documentElement;
+}
+
+function isParent(parent, child) {
+  return parent.contains(child);
+}
+
+function isSibling(el1, el2) {
+  return el1.parentElement === el2.parentElement;
+}
+
+function getBlockElementUniqueID(element) {
+  const rect = element.getBoundingClientRect();
+
+  const hitElement = expectHitTarget(
+    {
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2,
+    },
+    element,
+  );
+
+  if (!hitElement) {
+    return "";
+  }
+
+  return hitElement.getAttribute("unique_id") ?? "";
+}
+
 function isHidden(element) {
   const style = getElementComputedStyle(element);
-  return style?.display === "none" || element.hidden;
+  if (style?.display === "none") {
+    return true;
+  }
+  if (element.hidden) {
+    if (
+      style?.cursor === "pointer" &&
+      element.tagName.toLowerCase() === "input" &&
+      (element.type === "submit" || element.type === "button")
+    ) {
+      // there are cases where the input is a "submit" button and the cursor is a pointer but the element has the hidden attr.
+      // such an element is not really hidden
+      return false;
+    }
+    return true;
+  }
+  return false;
 }
 
 function isHiddenOrDisabled(element) {
@@ -264,6 +462,31 @@ function isScriptOrStyle(element) {
   return tagName === "script" || tagName === "style";
 }
 
+function isReadonlyElement(element) {
+  if (element.readOnly) {
+    return true;
+  }
+
+  if (element.hasAttribute("readonly")) {
+    return true;
+  }
+
+  if (element.hasAttribute("aria-readonly")) {
+    // only aria-readonly="false" should be considered as "not readonly"
+    return (
+      element.getAttribute("aria-readonly").toLowerCase().trim() !== "false"
+    );
+  }
+
+  return false;
+}
+
+function hasAngularClickBinding(element) {
+  return (
+    element.hasAttribute("ng-click") || element.hasAttribute("data-ng-click")
+  );
+}
+
 function hasWidgetRole(element) {
   const role = element.getAttribute("role");
   if (!role) {
@@ -271,6 +494,10 @@ function hasWidgetRole(element) {
   }
   // https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Roles#2._widget_roles
   // Not all roles make sense for the time being so we only check for the ones that do
+  if (role.toLowerCase().trim() === "textbox") {
+    return !isReadonlyElement(element);
+  }
+
   const widgetRoles = [
     "button",
     "link",
@@ -281,7 +508,6 @@ function hasWidgetRole(element) {
     "radio",
     "tab",
     "combobox",
-    "textbox",
     "searchbox",
     "slider",
     "spinbutton",
@@ -291,44 +517,46 @@ function hasWidgetRole(element) {
   return widgetRoles.includes(role.toLowerCase().trim());
 }
 
+function isTableRelatedElement(element) {
+  const tagName = element.tagName.toLowerCase();
+  return [
+    "table",
+    "caption",
+    "thead",
+    "tbody",
+    "tfoot",
+    "tr",
+    "th",
+    "td",
+    "colgroup",
+    "col",
+  ].includes(tagName);
+}
+
 function isInteractableInput(element) {
   const tagName = element.tagName.toLowerCase();
-  const type = element.getAttribute("type") ?? "text"; // Default is text: https://www.w3schools.com/html/html_form_input_types.asp
   if (tagName !== "input") {
     // let other checks decide
     return false;
   }
-  const clickableTypes = [
-    "button",
-    "checkbox",
-    "date",
-    "datetime-local",
-    "email",
-    "file",
-    "image",
-    "month",
-    "number",
-    "password",
-    "radio",
-    "range",
-    "reset",
-    "search",
-    "submit",
-    "tel",
-    "text",
-    "time",
-    "url",
-    "week",
-  ];
-  return clickableTypes.includes(type.toLowerCase().trim());
+  // Browsers default to "text" when the type is not set or is invalid
+  // Here's the list of valid types: https://developer.mozilla.org/en-US/docs/Web/HTML/Element/input#input_types
+  // Examples of unrecognized types that we've seen and caused issues because we didn't mark them interactable:
+  // "city", "state", "zip", "country"
+  // That's the reason I (Kerem) removed the valid input types check
+  var type = element.getAttribute("type")?.toLowerCase().trim() ?? "text";
+  return !isReadonlyElement(element) && type !== "hidden";
 }
 
 function isInteractable(element) {
+  if (element.shadowRoot) {
+    return false;
+  }
   if (!isElementVisible(element)) {
     return false;
   }
 
-  if (isHiddenOrDisabled(element)) {
+  if (isHidden(element)) {
     return false;
   }
 
@@ -354,6 +582,11 @@ function isInteractable(element) {
     return true;
   }
 
+  // Check if the option's parent (select) is hidden or disabled
+  if (tagName === "option" && isHiddenOrDisabled(element.parentElement)) {
+    return false;
+  }
+
   if (
     tagName === "button" ||
     tagName === "select" ||
@@ -375,14 +608,19 @@ function isInteractable(element) {
     return true;
   }
 
-  if (tagName === "div" || tagName === "img" || tagName === "span") {
-    const computedStyle = window.getComputedStyle(element);
-    const hasPointer = computedStyle.cursor === "pointer";
-    const hasCursor = computedStyle.cursor === "cursor";
-    return hasPointer || hasCursor;
+  if (tagName === "div" || tagName === "span") {
+    if (hasAngularClickBinding(element)) {
+      return true;
+    }
+    // https://www.oxygenxml.com/dita/1.3/specs/langRef/technicalContent/svg-container.html
+    // svg-container is usually used for clickable elements that wrap SVGs
+    if (element.className.toString().includes("svg-container")) {
+      return true;
+    }
   }
 
   // support listbox and options underneath it
+  // div element should be checked here before the css pointer
   if (
     (tagName === "ul" || tagName === "div") &&
     element.hasAttribute("role") &&
@@ -398,7 +636,88 @@ function isInteractable(element) {
     return true;
   }
 
+  if (
+    tagName === "li" &&
+    element.className.toString().includes("ui-menu-item")
+  ) {
+    return true;
+  }
+
+  // google map address auto complete
+  // https://developers.google.com/maps/documentation/javascript/place-autocomplete#style-autocomplete
+  // demo: https://developers.google.com/maps/documentation/javascript/examples/places-autocomplete-addressform
+  if (
+    tagName === "div" &&
+    element.className.toString().includes("pac-item") &&
+    element.closest('div[class*="pac-container"]')
+  ) {
+    return true;
+  }
+
+  if (
+    tagName === "div" &&
+    element.hasAttribute("aria-disabled") &&
+    element.getAttribute("aria-disabled").toLowerCase() === "false"
+  ) {
+    return true;
+  }
+
+  if (tagName === "span" && element.closest('div[id*="dropdown-container"]')) {
+    return true;
+  }
+
+  if (
+    tagName === "div" ||
+    tagName === "img" ||
+    tagName === "span" ||
+    tagName === "a" ||
+    tagName === "i" ||
+    tagName === "li" ||
+    tagName === "p"
+  ) {
+    const computedStyle = window.getComputedStyle(element);
+    if (computedStyle.cursor === "pointer") {
+      return true;
+    }
+    // FIXME: hardcode to fix the bug about hover style now
+    if (element.className.toString().includes("hover:cursor-pointer")) {
+      return true;
+    }
+
+    // auto for <a> is equal to pointer for <a>
+    if (tagName == "a" && computedStyle.cursor === "auto") {
+      return true;
+    }
+  }
+
+  if (hasASPClientControl() && tagName === "tr") {
+    return true;
+  }
   return false;
+}
+
+function isScrollable(element) {
+  const scrollHeight = element.scrollHeight || 0;
+  const clientHeight = element.clientHeight || 0;
+  const scrollWidth = element.scrollWidth || 0;
+  const clientWidth = element.clientWidth || 0;
+
+  const hasScrollableContent =
+    scrollHeight > clientHeight || scrollWidth > clientWidth;
+  const hasScrollableOverflow = isScrollableOverflow(element);
+  return hasScrollableContent && hasScrollableOverflow;
+}
+
+function isScrollableOverflow(element) {
+  const style = window.getComputedStyle(element);
+  return (
+    style.overflow === "auto" ||
+    style.overflow === "scroll" ||
+    style.overflowX === "auto" ||
+    style.overflowX === "scroll" ||
+    style.overflowY === "auto" ||
+    style.overflowY === "scroll"
+  );
 }
 
 const isComboboxDropdown = (element) => {
@@ -418,11 +737,38 @@ const isComboboxDropdown = (element) => {
   return role && haspopup && controls && readonly;
 };
 
-const isSelect2Dropdown = (element) => {
+const isDropdownButton = (element) => {
+  const tagName = element.tagName.toLowerCase();
+  const type = element.getAttribute("type")
+    ? element.getAttribute("type").toLowerCase()
+    : "";
+  const haspopup = element.getAttribute("aria-haspopup")
+    ? element.getAttribute("aria-haspopup").toLowerCase()
+    : "";
+  const hasExpanded = element.hasAttribute("aria-expanded");
   return (
-    element.tagName.toLowerCase() === "span" &&
-    element.className.toString().includes("select2-chosen")
+    tagName === "button" &&
+    type === "button" &&
+    (hasExpanded || haspopup === "listbox")
   );
+};
+
+const isSelect2Dropdown = (element) => {
+  const tagName = element.tagName.toLowerCase();
+  const className = element.className.toString();
+  const role = element.getAttribute("role")
+    ? element.getAttribute("role").toLowerCase()
+    : "";
+
+  if (tagName === "a") {
+    return className.includes("select2-choice");
+  }
+
+  if (tagName === "span") {
+    return className.includes("select2-selection") && role === "combobox";
+  }
+
+  return false;
 };
 
 const isSelect2MultiChoice = (element) => {
@@ -431,6 +777,63 @@ const isSelect2MultiChoice = (element) => {
     element.className.toString().includes("select2-input")
   );
 };
+
+const isReactSelectDropdown = (element) => {
+  return (
+    element.tagName.toLowerCase() === "input" &&
+    element.className.toString().includes("select__input") &&
+    element.getAttribute("role") === "combobox"
+  );
+};
+
+function hasNgAttribute(element) {
+  for (let attr of element.attributes) {
+    if (attr.name.startsWith("ng-")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const isAngularDropdown = (element) => {
+  if (!hasNgAttribute(element)) {
+    return false;
+  }
+
+  const tagName = element.tagName.toLowerCase();
+  if (tagName === "input" || tagName === "span") {
+    const ariaLabel = element.hasAttribute("aria-label")
+      ? element.getAttribute("aria-label").toLowerCase()
+      : "";
+    return ariaLabel.includes("select") || ariaLabel.includes("choose");
+  }
+
+  return false;
+};
+
+function getPseudoContent(element, pseudo) {
+  const pseudoStyle = getElementComputedStyle(element, pseudo);
+  if (!pseudoStyle) {
+    return null;
+  }
+  const content = pseudoStyle
+    .getPropertyValue("content")
+    .replace(/"/g, "")
+    .trim();
+
+  if (content === "none" || !content) {
+    return null;
+  }
+
+  return content;
+}
+
+function hasBeforeOrAfterPseudoContent(element) {
+  return (
+    getPseudoContent(element, "::before") != null ||
+    getPseudoContent(element, "::after") != null
+  );
+}
 
 const checkParentClass = (className) => {
   const targetParentClasses = ["field", "entry"];
@@ -477,6 +880,14 @@ const checkRequiredFromStyle = (element) => {
 
   return element.className.toLowerCase().includes("require");
 };
+
+function checkDisabledFromStyle(element) {
+  const className = element.className.toString().toLowerCase();
+  if (className.includes("react-datepicker__day--disabled")) {
+    return true;
+  }
+  return false;
+}
 
 function getElementContext(element) {
   // dfs to collect the non unique_id context
@@ -594,74 +1005,34 @@ function getSelectOptions(element) {
       text: removeMultipleSpaces(option.textContent),
     });
   }
-  return selectOptions;
-}
 
-function getListboxOptions(element) {
-  // get all the elements with role="option" under the element
-  var optionElements = element.querySelectorAll('[role="option"]');
-  let selectOptions = [];
-  for (var i = 0; i < optionElements.length; i++) {
-    let ele = optionElements[i];
-
-    selectOptions.push({
-      optionIndex: i,
-      text: removeMultipleSpaces(getVisibleText(ele)),
-    });
+  const selectedOption = element.querySelector("option:checked");
+  if (!selectedOption) {
+    return [selectOptions, ""];
   }
-  return selectOptions;
+
+  return [selectOptions, removeMultipleSpaces(selectedOption.textContent)];
 }
 
-async function getSelect2OptionElements() {
-  let optionList = [];
-
-  while (true) {
-    oldOptionCount = optionList.length;
-    let newOptionList = document.querySelectorAll(
-      "#select2-drop li[role='option']",
+function getDOMElementBySkyvenElement(elementObj) {
+  // if element has shadowHost set, we need to find the shadowHost element first then find the element
+  if (elementObj.shadowHost) {
+    let shadowHostEle = document.querySelector(
+      `[unique_id="${elementObj.shadowHost}"]`,
     );
-    if (newOptionList.length === oldOptionCount) {
-      console.log("no more options loaded, wait 5s to query again");
-      // sometimes need more time to load the options, so sleep 10s and try again
-      await sleep(5000); // wait 5s
-      newOptionList = document.querySelectorAll(
-        "#select2-drop li[role='option']",
+    if (!shadowHostEle) {
+      console.log(
+        "Could not find shadowHost element with unique_id: ",
+        elementObj.shadowHost,
       );
-      console.log(newOptionList.length, " options found, after 5s");
+      return null;
     }
-
-    optionList = newOptionList;
-    if (optionList.length === 0 || optionList.length === oldOptionCount) {
-      break;
-    }
-
-    lastOption = optionList[optionList.length - 1];
-    if (!lastOption.className.toString().includes("select2-more-results")) {
-      break;
-    }
-    lastOption.scrollIntoView();
+    return shadowHostEle.shadowRoot.querySelector(
+      `[unique_id="${elementObj.id}"]`,
+    );
   }
 
-  return optionList;
-}
-
-async function getSelect2Options() {
-  const optionList = await getSelect2OptionElements();
-
-  let selectOptions = [];
-  for (let i = 0; i < optionList.length; i++) {
-    let ele = optionList[i];
-    if (ele.className.toString().includes("select2-more-results")) {
-      continue;
-    }
-
-    selectOptions.push({
-      optionIndex: i,
-      text: removeMultipleSpaces(ele.textContent),
-    });
-  }
-
-  return selectOptions;
+  return document.querySelector(`[unique_id="${elementObj.id}"]`);
 }
 
 function uniqueId() {
@@ -675,125 +1046,125 @@ function uniqueId() {
   return result;
 }
 
-async function buildTreeFromBody(frame = "main.frame", open_select = false) {
+function buildElementObject(frame, element, interactable, purgeable = false) {
+  var element_id = element.getAttribute("unique_id") ?? uniqueId();
+  var elementTagNameLower = element.tagName.toLowerCase();
+  element.setAttribute("unique_id", element_id);
+
+  const attrs = {};
+  for (const attr of element.attributes) {
+    var attrValue = attr.value;
+    if (
+      attr.name === "required" ||
+      attr.name === "aria-required" ||
+      attr.name === "checked" ||
+      attr.name === "aria-checked" ||
+      attr.name === "selected" ||
+      attr.name === "aria-selected" ||
+      attr.name === "readonly" ||
+      attr.name === "aria-readonly" ||
+      attr.name === "disabled" ||
+      attr.name === "aria-disabled"
+    ) {
+      if (attrValue && attrValue.toLowerCase() === "false") {
+        attrValue = false;
+      } else {
+        attrValue = true;
+      }
+    }
+    attrs[attr.name] = attrValue;
+  }
+
+  if (
+    checkDisabledFromStyle(element) &&
+    !attrs["disabled"] &&
+    !attrs["aria-disabled"]
+  ) {
+    attrs["disabled"] = true;
+  }
+
+  if (
+    checkRequiredFromStyle(element) &&
+    !attrs["required"] &&
+    !attrs["aria-required"]
+  ) {
+    attrs["required"] = true;
+  }
+
+  if (
+    elementTagNameLower === "input" &&
+    (element.type === "radio" || element.type === "checkbox")
+  ) {
+    // if checkbox and radio don't have "checked" and "aria-checked", add a checked="false" to help LLM understand
+    if (!("checked" in attrs) && !("aria-checked" in attrs)) {
+      attrs["checked"] = false;
+    }
+  }
+
+  if (elementTagNameLower === "input" || elementTagNameLower === "textarea") {
+    attrs["value"] = element.value;
+  }
+
+  let elementObj = {
+    id: element_id,
+    frame: frame,
+    interactable: interactable,
+    tagName: elementTagNameLower,
+    attributes: attrs,
+    beforePseudoText: getPseudoContent(element, "::before"),
+    text: getElementContent(element),
+    afterPseudoText: getPseudoContent(element, "::after"),
+    children: [],
+    rect: DomUtils.getVisibleClientRect(element, true),
+    // if purgeable is True, which means this element is only used for building the tree relationship
+    purgeable: purgeable,
+    // don't trim any attr of this element if keepAllAttr=True
+    keepAllAttr:
+      elementTagNameLower === "svg" || element.closest("svg") !== null,
+    isSelectable:
+      elementTagNameLower === "select" ||
+      isDropdownButton(element) ||
+      isAngularDropdown(element) ||
+      isSelect2Dropdown(element) ||
+      isSelect2MultiChoice(element),
+  };
+
+  let isInShadowRoot = element.getRootNode() instanceof ShadowRoot;
+  if (isInShadowRoot) {
+    let shadowHostEle = element.getRootNode().host;
+    let shadowHostId = shadowHostEle.getAttribute("unique_id");
+    // assign shadowHostId to the shadowHost element if it doesn't have unique_id
+    if (!shadowHostId) {
+      shadowHostId = uniqueId();
+      shadowHostEle.setAttribute("unique_id", shadowHostId);
+    }
+    elementObj.shadowHost = shadowHostId;
+  }
+
+  // get options for select element or for listbox element
+  let selectOptions = null;
+  let selectedValue = "";
+  if (elementTagNameLower === "select") {
+    [selectOptions, selectedValue] = getSelectOptions(element);
+  }
+
+  if (selectOptions) {
+    elementObj.options = selectOptions;
+  }
+  if (selectedValue) {
+    elementObj.attributes["selected"] = selectedValue;
+  }
+
+  return elementObj;
+}
+
+function buildTreeFromBody(frame = "main.frame") {
+  return buildElementTree(document.body, frame);
+}
+
+function buildElementTree(starter = document.body, frame, full_tree = false) {
   var elements = [];
   var resultArray = [];
-
-  async function buildElementObject(element, interactable) {
-    var element_id = element.getAttribute("unique_id") ?? uniqueId();
-    var elementTagNameLower = element.tagName.toLowerCase();
-    element.setAttribute("unique_id", element_id);
-
-    const attrs = {};
-    for (const attr of element.attributes) {
-      var attrValue = attr.value;
-      if (
-        attr.name === "required" ||
-        attr.name === "aria-required" ||
-        attr.name === "checked" ||
-        attr.name === "aria-checked" ||
-        attr.name === "selected" ||
-        attr.name === "aria-selected" ||
-        attr.name === "readonly" ||
-        attr.name === "aria-readonly"
-      ) {
-        if (attrValue && attrValue.toLowerCase() === "false") {
-          attrValue = false;
-        } else {
-          attrValue = true;
-        }
-      }
-      attrs[attr.name] = attrValue;
-    }
-
-    if (
-      checkRequiredFromStyle(element) &&
-      !attrs["required"] &&
-      !attrs["aria-required"]
-    ) {
-      attrs["required"] = true;
-    }
-
-    if (elementTagNameLower === "input" || elementTagNameLower === "textarea") {
-      attrs["value"] = element.value;
-    }
-
-    let elementObj = {
-      id: element_id,
-      frame: frame,
-      interactable: interactable,
-      tagName: elementTagNameLower,
-      attributes: attrs,
-      text: getElementContent(element),
-      children: [],
-      rect: DomUtils.getVisibleClientRect(element, true),
-      // don't trim any attr of this element if keepAllAttr=True
-      keepAllAttr:
-        elementTagNameLower === "svg" || element.closest("svg") !== null,
-    };
-
-    // get options for select element or for listbox element
-    let selectOptions = null;
-    if (elementTagNameLower === "select") {
-      selectOptions = getSelectOptions(element);
-    } else if (attrs["role"] && attrs["role"].toLowerCase() === "listbox") {
-      // if "role" key is inside attrs, then get all the elements with role "option" and get their text
-      selectOptions = getListboxOptions(element);
-    } else if (open_select && isComboboxDropdown(element)) {
-      // open combobox dropdown to get options
-      element.click();
-      const listBox = document.getElementById(
-        element.getAttribute("aria-controls"),
-      );
-      if (listBox) {
-        selectOptions = getListboxOptions(listBox);
-      }
-      // HACK: press Tab to close the dropdown
-      element.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          keyCode: 9,
-          bubbles: true,
-          key: "Tab",
-        }),
-      );
-    } else if (open_select && isSelect2Dropdown(element)) {
-      // click element to show options
-      element.dispatchEvent(
-        new MouseEvent("mousedown", {
-          bubbles: true,
-          view: window,
-        }),
-      );
-
-      selectOptions = await getSelect2Options();
-
-      // HACK: click again to close the dropdown
-      element.dispatchEvent(
-        new MouseEvent("mousedown", {
-          bubbles: true,
-          view: window,
-        }),
-      );
-    } else if (open_select && isSelect2MultiChoice(element)) {
-      // click element to show options
-      element.click();
-      selectOptions = await getSelect2Options();
-
-      // HACK: press ESC to close the dropdown
-      element.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          keyCode: 27,
-          bubbles: true,
-          key: "Escape",
-        }),
-      );
-    }
-    if (selectOptions) {
-      elementObj.options = selectOptions;
-    }
-
-    return elementObj;
-  }
 
   function getChildElements(element) {
     if (element.childElementCount !== 0) {
@@ -802,9 +1173,14 @@ async function buildTreeFromBody(frame = "main.frame", open_select = false) {
       return [];
     }
   }
-  async function processElement(element, parentId) {
+  function processElement(element, parentId) {
     if (element === null) {
       console.log("get a null element");
+      return;
+    }
+
+    // skip proccessing option element as they are already added to the select.options
+    if (element.tagName.toLowerCase() === "option") {
       return;
     }
 
@@ -818,7 +1194,7 @@ async function buildTreeFromBody(frame = "main.frame", open_select = false) {
 
     // Check if the element is interactable
     if (isInteractable(element)) {
-      var elementObj = await buildElementObject(element, true);
+      var elementObj = buildElementObject(frame, element, true);
       elements.push(elementObj);
       // If the element is interactable but has no interactable parent,
       // then it starts a new tree, so add it to the result array
@@ -835,22 +1211,34 @@ async function buildTreeFromBody(frame = "main.frame", open_select = false) {
           .find((element) => element.id === parentId)
           .children.push(elementObj);
       }
-      // options already added to the select.options, no need to add options anymore
-      if (elementObj.options && elementObj.options.length > 0) {
-        return elementObj;
-      }
       // Recursively process the children of the element
       const children = getChildElements(element);
       for (let i = 0; i < children.length; i++) {
         const childElement = children[i];
-        await processElement(childElement, elementObj.id);
+        processElement(childElement, elementObj.id);
       }
       return elementObj;
     } else if (element.tagName.toLowerCase() === "iframe") {
-      let iframeElementObject = await buildElementObject(element, false);
+      let iframeElementObject = buildElementObject(frame, element, false);
 
       elements.push(iframeElementObject);
       resultArray.push(iframeElementObject);
+    } else if (element.shadowRoot) {
+      // shadow host element
+      let shadowHostElement = buildElementObject(frame, element, false);
+      elements.push(shadowHostElement);
+      resultArray.push(shadowHostElement);
+
+      const children = getChildElements(element.shadowRoot);
+      for (let i = 0; i < children.length; i++) {
+        const childElement = children[i];
+        processElement(childElement, shadowHostElement.id);
+      }
+      const selfChildren = getChildElements(element);
+      for (let i = 0; i < selfChildren.length; i++) {
+        const childElement = selfChildren[i];
+        processElement(childElement, shadowHostElement.id);
+      }
     } else {
       // For a non-interactable element, if it has direct text, we also tagged
       // it with unique_id, but with interatable=false in the element.
@@ -866,10 +1254,33 @@ async function buildTreeFromBody(frame = "main.frame", open_select = false) {
         let isParentSVG = element.closest("svg");
         if (element.tagName.toLowerCase() === "svg") {
           // if element is <svg> we save all attributes and its children
-          elementObj = await buildElementObject(element, false);
+          elementObj = buildElementObject(frame, element, false);
         } else if (isParentSVG && isParentSVG.getAttribute("unique_id")) {
           // if elemnet is the children of the <svg> with an unique_id
-          elementObj = await buildElementObject(element, false);
+          elementObj = buildElementObject(frame, element, false);
+        } else if (isTableRelatedElement(element)) {
+          // build all table related elements into skyvern element
+          // we need these elements to preserve the DOM structure
+          elementObj = buildElementObject(frame, element, false);
+        } else if (hasBeforeOrAfterPseudoContent(element)) {
+          elementObj = buildElementObject(frame, element, false);
+        } else if (full_tree) {
+          // when building full tree, we only get text from element itself
+          // elements without text are purgeable
+          elementObj = buildElementObject(frame, element, false, true);
+          let textContent = "";
+          if (isElementVisible(element)) {
+            for (let i = 0; i < element.childNodes.length; i++) {
+              var node = element.childNodes[i];
+              if (node.nodeType === Node.TEXT_NODE) {
+                textContent += node.data.trim();
+              }
+            }
+          }
+          elementObj.text = textContent;
+          if (textContent.length > 0) {
+            elementObj.purgeable = false;
+          }
         } else {
           // character length limit for non-interactable elements should be 5000
           // we don't use element context in HTML format,
@@ -882,7 +1293,7 @@ async function buildTreeFromBody(frame = "main.frame", open_select = false) {
             }
           }
           if (textContent && textContent.length <= 5000) {
-            elementObj = await buildElementObject(element, false);
+            elementObj = buildElementObject(frame, element, false);
           }
         }
 
@@ -903,7 +1314,7 @@ async function buildTreeFromBody(frame = "main.frame", open_select = false) {
       const children = getChildElements(element);
       for (let i = 0; i < children.length; i++) {
         const childElement = children[i];
-        await processElement(childElement, parentId);
+        processElement(childElement, parentId);
       }
     }
   }
@@ -915,7 +1326,10 @@ async function buildTreeFromBody(frame = "main.frame", open_select = false) {
 
     // look up for 10 levels to find the most contextual parent element
     let targetContextualParent = null;
-    let currentEle = document.querySelector(`[unique_id="${element.id}"]`);
+    let currentEle = getDOMElementBySkyvenElement(element);
+    if (!currentEle) {
+      return ctx;
+    }
     let parentEle = currentEle;
     for (var i = 0; i < 10; i++) {
       parentEle = parentEle.parentElement;
@@ -953,7 +1367,12 @@ async function buildTreeFromBody(frame = "main.frame", open_select = false) {
   };
 
   const getContextByLinked = (element, ctx) => {
-    let currentEle = document.querySelector(`[unique_id="${element.id}"]`);
+    let currentEle = getDOMElementBySkyvenElement(element);
+    if (!currentEle) {
+      return ctx;
+    }
+
+    const document = currentEle.getRootNode();
     // check labels pointed to this element
     // 1. element id -> labels pointed to this id
     // 2. by attr "aria-labelledby" -> only one label with this id
@@ -1006,9 +1425,11 @@ async function buildTreeFromBody(frame = "main.frame", open_select = false) {
     // if the element is a child of a td, th, or tr, then pass the grandparent's context to the element
     let parentTagsThatDelegateParentContext = new Set(["td", "th", "tr"]);
     if (tagsWithDirectParentContext.has(element.tagName)) {
-      let parentElement = document.querySelector(
-        `[unique_id="${element.id}"]`,
-      ).parentElement;
+      let curElement = getDOMElementBySkyvenElement(element);
+      if (!curElement) {
+        return ctx;
+      }
+      let parentElement = curElement.parentElement;
       if (!parentElement) {
         return ctx;
       }
@@ -1088,7 +1509,11 @@ async function buildTreeFromBody(frame = "main.frame", open_select = false) {
         const labelElement = document.querySelector(
           element.tagName + '[unique_id="' + element.id + '"]',
         );
-        if (labelElement && labelElement.childElementCount === 0) {
+        if (
+          labelElement &&
+          labelElement.childElementCount === 0 &&
+          !labelElement.getAttribute("for")
+        ) {
           continue;
         }
       }
@@ -1097,9 +1522,8 @@ async function buildTreeFromBody(frame = "main.frame", open_select = false) {
     return trimmedResults;
   };
 
-  // TODO: Handle iframes
   // setup before parsing the dom
-  await processElement(document.body, null);
+  processElement(starter, null);
 
   for (var element of elements) {
     if (
@@ -1116,9 +1540,23 @@ async function buildTreeFromBody(frame = "main.frame", open_select = false) {
     }
 
     let ctxList = [];
-    ctxList = getContextByLinked(element, ctxList);
-    ctxList = getContextByParent(element, ctxList);
-    ctxList = getContextByTable(element, ctxList);
+    try {
+      ctxList = getContextByLinked(element, ctxList);
+    } catch (e) {
+      console.error("failed to get context by linked: ", e);
+    }
+
+    try {
+      ctxList = getContextByParent(element, ctxList);
+    } catch (e) {
+      console.error("failed to get context by parent: ", e);
+    }
+
+    try {
+      ctxList = getContextByTable(element, ctxList);
+    } catch (e) {
+      console.error("failed to get context by table: ", e);
+    }
     const context = ctxList.join(";");
     if (context && context.length <= 5000) {
       element.context = context;
@@ -1149,6 +1587,11 @@ function drawBoundingBoxes(elements) {
   var groups = groupElementsVisually(elements);
   var hintMarkers = createHintMarkersForGroups(groups);
   addHintMarkersToPage(hintMarkers);
+}
+
+function buildElementsAndDrawBoundingBoxes() {
+  var elementsAndResultArray = buildTreeFromBody();
+  drawBoundingBoxes(elementsAndResultArray[0]);
 }
 
 function captchaSolvedCallback() {
@@ -1234,15 +1677,30 @@ function createHintMarkersForGroups(groups) {
     return [];
   }
 
-  const hintMarkers = groups.map((group) => createHintMarkerForGroup(group));
-
+  const hintMarkers = groups
+    .filter((group) => group.elements.some((element) => element.interactable))
+    .map((group) => createHintMarkerForGroup(group));
   // fill in marker text
-  const hintStrings = generateHintStrings(hintMarkers.length);
+  // const hintStrings = generateHintStrings(hintMarkers.length);
   for (let i = 0; i < hintMarkers.length; i++) {
     const hintMarker = hintMarkers[i];
-    hintMarker.hintString = hintStrings[i];
+
+    let interactableElementFound = false;
+
+    for (let i = 0; i < hintMarker.group.elements.length; i++) {
+      if (hintMarker.group.elements[i].interactable) {
+        hintMarker.hintString = hintMarker.group.elements[i].id;
+        interactableElementFound = true;
+        break;
+      }
+    }
+
+    if (!interactableElementFound) {
+      hintMarker.hintString = "";
+    }
+
     try {
-      hintMarker.element.innerHTML = hintMarker.hintString.toUpperCase();
+      hintMarker.element.innerHTML = hintMarker.hintString;
     } catch (e) {
       // Ensure trustedTypes is available
       if (typeof trustedTypes !== "undefined") {
@@ -1262,21 +1720,22 @@ function createHintMarkersForGroups(groups) {
 }
 
 function createHintMarkerForGroup(group) {
+  // Calculate the position of the element relative to the document
+  var scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+  var scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+
   const marker = {};
   // yellow annotation box with string
   const el = document.createElement("div");
-  el.style.left = group.rect.left + "px";
-  el.style.top = group.rect.top + "px";
+  el.style.position = "absolute";
+  el.style.left = group.rect.left + scrollLeft + "px";
+  el.style.top = group.rect.top + scrollTop + "px";
   // Each group is assigned a different incremental z-index, we use the same z-index for the
   // bounding box and the hint marker
   el.style.zIndex = this.currentZIndex;
 
   // The bounding box around the group of hints.
   const boundingBox = document.createElement("div");
-
-  // Calculate the position of the element relative to the document
-  var scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-  var scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
 
   // Set styles for the bounding box
   boundingBox.style.position = "absolute";
@@ -1302,7 +1761,7 @@ function addHintMarkersToPage(hintMarkers) {
   const parent = document.createElement("div");
   parent.id = "boundingBoxContainer";
   for (const hintMarker of hintMarkers) {
-    // parent.appendChild(hintMarker.element);
+    parent.appendChild(hintMarker.element);
     parent.appendChild(hintMarker.boundingBox);
   }
   document.documentElement.appendChild(parent);
@@ -1315,17 +1774,24 @@ function removeBoundingBoxes() {
   }
 }
 
-async function scrollToTop(draw_boxes) {
+function scrollToTop(draw_boxes) {
   removeBoundingBoxes();
   window.scroll({ left: 0, top: 0, behavior: "instant" });
   if (draw_boxes) {
-    var elementsAndResultArray = await buildTreeFromBody();
-    drawBoundingBoxes(elementsAndResultArray[0]);
+    buildElementsAndDrawBoundingBoxes();
   }
   return window.scrollY;
 }
 
-async function scrollToNextPage(draw_boxes) {
+function getScrollXY() {
+  return [window.scrollX, window.scrollY];
+}
+
+function scrollToXY(x, y) {
+  window.scroll({ left: x, top: y, behavior: "instant" });
+}
+
+function scrollToNextPage(draw_boxes) {
   // remove bounding boxes, scroll to next page with 200px overlap, then draw bounding boxes again
   // return true if there is a next page, false otherwise
   removeBoundingBoxes();
@@ -1335,12 +1801,271 @@ async function scrollToNextPage(draw_boxes) {
     behavior: "instant",
   });
   if (draw_boxes) {
-    var elementsAndResultArray = await buildTreeFromBody();
-    drawBoundingBoxes(elementsAndResultArray[0]);
+    buildElementsAndDrawBoundingBoxes();
   }
   return window.scrollY;
 }
 
-async function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function isWindowScrollable() {
+  // Check if the body's overflow style is set to hidden
+  const bodyOverflow = window.getComputedStyle(document.body).overflow;
+  const htmlOverflow = window.getComputedStyle(
+    document.documentElement,
+  ).overflow;
+
+  // Check if the document height is greater than the window height
+  const isScrollable =
+    document.documentElement.scrollHeight > window.innerHeight;
+
+  // If the overflow is set to 'hidden' or there is no content to scroll, return false
+  if (bodyOverflow === "hidden" || htmlOverflow === "hidden" || !isScrollable) {
+    return false;
+  }
+
+  return true;
+}
+
+function scrollToElementBottom(element, page_by_page = false) {
+  const top = page_by_page
+    ? element.clientHeight + element.scrollTop
+    : element.scrollHeight;
+  element.scroll({
+    top: top,
+    left: 0,
+    behavior: "smooth",
+  });
+}
+
+function scrollToElementTop(element) {
+  element.scroll({
+    top: 0,
+    left: 0,
+    behavior: "instant",
+  });
+}
+
+// Helper method for debugging
+function findNodeById(arr, targetId, path = []) {
+  for (let i = 0; i < arr.length; i++) {
+    const currentPath = [...path, arr[i].id];
+    if (arr[i].id === targetId) {
+      console.log("Lineage:", currentPath.join(" -> "));
+      return arr[i];
+    }
+    if (arr[i].children && arr[i].children.length > 0) {
+      const result = findNodeById(arr[i].children, targetId, currentPath);
+      if (result) {
+        return result;
+      }
+    }
+  }
+  return null;
+}
+
+function getElementDomDepth(elementNode) {
+  let depth = 0;
+  const rootElement = elementNode.getRootNode().firstElementChild;
+  while (elementNode !== rootElement && elementNode.parentElement) {
+    depth++;
+    elementNode = elementNode.parentElement;
+  }
+  return depth;
+}
+
+if (window.globalOneTimeIncrementElements === undefined) {
+  window.globalOneTimeIncrementElements = [];
+}
+
+if (window.globalDomDepthMap === undefined) {
+  window.globalDomDepthMap = new Map();
+}
+
+function isClassNameIncludesHidden(className) {
+  // some hidden elements are with the classname like `class="select-items select-hide"`
+  return className.toLowerCase().includes("hide");
+}
+
+function addIncrementalNodeToMap(parentNode, childrenNode) {
+  // calculate the depth of targetNode element for sorting
+  const depth = getElementDomDepth(parentNode);
+  let newNodesTreeList = [];
+  if (window.globalDomDepthMap.has(depth)) {
+    newNodesTreeList = window.globalDomDepthMap.get(depth);
+  }
+
+  for (const child of childrenNode) {
+    const [_, newNodeTree] = buildElementTree(child, "", true);
+    if (newNodeTree.length > 0) {
+      newNodesTreeList.push(...newNodeTree);
+    }
+  }
+  window.globalDomDepthMap.set(depth, newNodesTreeList);
+}
+
+if (window.globalObserverForDOMIncrement === undefined) {
+  window.globalObserverForDOMIncrement = new MutationObserver(function (
+    mutationsList,
+    observer,
+  ) {
+    // TODO: how to detect duplicated recreate element?
+    for (const mutation of mutationsList) {
+      if (mutation.type === "attributes") {
+        if (mutation.attributeName === "hidden") {
+          const node = mutation.target;
+          if (!node.hidden) {
+            window.globalOneTimeIncrementElements.push({
+              targetNode: node,
+              newNodes: [node],
+            });
+            addIncrementalNodeToMap(node, [node]);
+          }
+        }
+        if (mutation.attributeName === "style") {
+          // TODO: need to confirm that elemnent is hidden previously
+          const node = mutation.target;
+          if (node.nodeType === Node.TEXT_NODE) continue;
+          const newStyle = window.getComputedStyle(node);
+          const newDisplay = newStyle.display;
+          if (newDisplay !== "none") {
+            window.globalOneTimeIncrementElements.push({
+              targetNode: node,
+              newNodes: [node],
+            });
+            addIncrementalNodeToMap(node, [node]);
+          }
+        }
+        if (mutation.attributeName === "class") {
+          const node = mutation.target;
+          if (
+            !mutation.oldValue ||
+            !isClassNameIncludesHidden(mutation.oldValue)
+          )
+            continue;
+          const newStyle = window.getComputedStyle(node);
+          const newDisplay = newStyle.display;
+          if (newDisplay !== "none") {
+            window.globalOneTimeIncrementElements.push({
+              targetNode: node,
+              newNodes: [node],
+            });
+            addIncrementalNodeToMap(node, [node]);
+          }
+        }
+      }
+
+      if (mutation.type === "childList") {
+        let changedNode = {
+          targetNode: mutation.target, // TODO: for future usage, when we want to parse new elements into a tree
+        };
+        let newNodes = [];
+        if (mutation.addedNodes && mutation.addedNodes.length > 0) {
+          for (const node of mutation.addedNodes) {
+            // skip the text nodes, they won't be interactable
+            if (node.nodeType === Node.TEXT_NODE) continue;
+            newNodes.push(node);
+          }
+        }
+        if (newNodes.length > 0) {
+          changedNode.newNodes = newNodes;
+          window.globalOneTimeIncrementElements.push(changedNode);
+          addIncrementalNodeToMap(changedNode.targetNode, changedNode.newNodes);
+        }
+      }
+    }
+  });
+}
+
+function startGlobalIncrementalObserver() {
+  window.globalDomDepthMap = new Map();
+  window.globalOneTimeIncrementElements = [];
+  window.globalObserverForDOMIncrement.takeRecords(); // cleanup the older data
+  window.globalObserverForDOMIncrement.observe(document.body, {
+    attributes: true,
+    attributeOldValue: true,
+    childList: true,
+    subtree: true,
+    characterData: true,
+  });
+}
+
+function stopGlobalIncrementalObserver() {
+  window.globalDomDepthMap = new Map();
+  window.globalObserverForDOMIncrement.disconnect();
+  window.globalObserverForDOMIncrement.takeRecords(); // cleanup the older data
+  window.globalOneTimeIncrementElements = [];
+}
+
+function getIncrementElements() {
+  // cleanup the chidren tree, remove the duplicated element
+  // search starting from the shallowest node:
+  // 1. if deeper, the node could only be the children of the shallower one or no related one.
+  // 2. if depth is same, the node could only be duplicated one or no related one.
+  const idToElement = new Map();
+  const cleanedTreeList = [];
+  const sortedDepth = Array.from(window.globalDomDepthMap.keys()).sort(
+    (a, b) => a - b,
+  );
+  for (let idx = 0; idx < sortedDepth.length; idx++) {
+    const depth = sortedDepth[idx];
+    const treeList = window.globalDomDepthMap.get(depth);
+
+    const removeDupAndConcatChildren = (element) => {
+      let children = element.children;
+      for (let i = 0; i < children.length; i++) {
+        const child = children[i];
+        const domElement = document.querySelector(`[unique_id="${child.id}"]`);
+        // if the element is still on the page, we rebuild the element to update the information
+        if (domElement) {
+          let newChild = buildElementObject(
+            "",
+            domElement,
+            child.interactable,
+            child.purgeable,
+          );
+          newChild.children = child.children;
+          children[i] = newChild;
+        }
+      }
+
+      if (idToElement.has(element.id)) {
+        element = idToElement.get(element.id);
+        for (let i = 0; i < children.length; i++) {
+          const child = children[i];
+          if (!idToElement.get(child.id)) {
+            element.children.push(child);
+          }
+        }
+      }
+      idToElement.set(element.id, element);
+      for (let i = 0; i < children.length; i++) {
+        const child = children[i];
+        removeDupAndConcatChildren(child);
+      }
+    };
+
+    for (let treeHeadElement of treeList) {
+      const domElement = document.querySelector(
+        `[unique_id="${treeHeadElement.id}"]`,
+      );
+      // if the element is still on the page, we rebuild the element to update the information
+      if (domElement) {
+        let newHead = buildElementObject(
+          "",
+          domElement,
+          treeHeadElement.interactable,
+          treeHeadElement.purgeable,
+        );
+        newHead.children = treeHeadElement.children;
+        treeHeadElement = newHead;
+      }
+
+      // check if the element is existed
+      if (!idToElement.has(treeHeadElement.id)) {
+        cleanedTreeList.push(treeHeadElement);
+      }
+      removeDupAndConcatChildren(treeHeadElement);
+    }
+  }
+
+  return [Array.from(idToElement.values()), cleanedTreeList];
 }

@@ -1,7 +1,7 @@
 import { getClient } from "@/api/AxiosClient";
 import { TaskApiResponse } from "@/api/types";
 import { useQuery } from "@tanstack/react-query";
-import { basicTimeFormat } from "@/util/timeFormat";
+import { basicLocalTimeFormat, basicTimeFormat } from "@/util/timeFormat";
 import {
   Table,
   TableBody,
@@ -26,10 +26,12 @@ function QueuedTasks() {
         .get("/tasks", {
           params: {
             task_status: "queued",
+            only_standalone_tasks: "true",
           },
         })
         .then((response) => response.data);
     },
+    refetchOnMount: "always",
   });
 
   function handleNavigate(event: React.MouseEvent, id: string) {
@@ -58,7 +60,7 @@ function QueuedTasks() {
         <TableBody>
           {tasks?.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={3}>No queued tasks</TableCell>
+              <TableCell colSpan={4}>No queued tasks</TableCell>
             </TableRow>
           ) : (
             tasks?.map((task) => {
@@ -69,14 +71,17 @@ function QueuedTasks() {
                   onClick={(event) => handleNavigate(event, task.task_id)}
                 >
                   <TableCell className="w-1/4">{task.task_id}</TableCell>
-                  <TableCell className="w-1/4 max-w-64 overflow-hidden whitespace-nowrap overflow-ellipsis">
+                  <TableCell className="w-1/4 max-w-64 overflow-hidden overflow-ellipsis whitespace-nowrap">
                     {task.request.url}
                   </TableCell>
                   <TableCell className="w-1/4">
                     <StatusBadge status={task.status} />
                   </TableCell>
-                  <TableCell className="w-1/4">
-                    {basicTimeFormat(task.created_at)}
+                  <TableCell
+                    className="w-1/4"
+                    title={basicTimeFormat(task.created_at)}
+                  >
+                    {basicLocalTimeFormat(task.created_at)}
                   </TableCell>
                 </TableRow>
               );

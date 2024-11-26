@@ -1,49 +1,47 @@
 import { getClient } from "@/api/AxiosClient";
-import { TaskApiResponse } from "@/api/types";
 import { useCredentialGetter } from "@/hooks/useCredentialGetter";
 import { useQuery } from "@tanstack/react-query";
 import { getRecordingURL } from "./artifactUtils";
 import { useParams } from "react-router-dom";
 import { Skeleton } from "@/components/ui/skeleton";
+import { TaskApiResponse } from "@/api/types";
 
 function TaskRecording() {
   const { taskId } = useParams();
   const credentialGetter = useCredentialGetter();
 
   const {
-    data: task,
-    isFetching: taskIsFetching,
+    data: recordingURL,
+    isLoading: taskIsLoading,
     isError: taskIsError,
-  } = useQuery<TaskApiResponse>({
-    queryKey: ["task", taskId],
+  } = useQuery<string | null>({
+    queryKey: ["task", taskId, "recordingURL"],
     queryFn: async () => {
       const client = await getClient(credentialGetter);
-      return client.get(`/tasks/${taskId}`).then((response) => response.data);
+      const task: TaskApiResponse = await client
+        .get(`/tasks/${taskId}`)
+        .then((response) => response.data);
+      return getRecordingURL(task);
     },
+    refetchOnMount: true,
   });
 
-  if (taskIsFetching) {
+  if (taskIsLoading) {
     return (
-      <div className="flex mx-auto">
-        <div className="w-[800px] h-[450px]">
-          <Skeleton className="h-full" />
-        </div>
+      <div className="h-[450px] w-[800px]">
+        <Skeleton className="h-full" />
       </div>
     );
   }
 
-  if (taskIsError || !task) {
+  if (taskIsError) {
     return <div>Error loading recording</div>;
   }
 
-  return (
-    <div className="flex mx-auto">
-      {task.recording_url ? (
-        <video width={800} height={450} src={getRecordingURL(task)} controls />
-      ) : (
-        <div>No recording available</div>
-      )}
-    </div>
+  return recordingURL ? (
+    <video width={800} height={450} src={recordingURL} controls />
+  ) : (
+    <div>No recording available for this task</div>
   );
 }
 

@@ -52,7 +52,7 @@
     {
       "name": "Book a demo",
       "icon": "calendar",
-      "url": "https://meetings.hubspot.com/suchintan"
+      "url": "https://meetings.hubspot.com/skyvern/demo"
     }
   ],
   "navigation": [
@@ -61,9 +61,7 @@
       "pages": [
         "introduction",
         "getting-started/skyvern-in-action",
-        "getting-started/quickstart-skyvern-cloud",
-        "getting-started/quickstart-open-source",
-        "getting-started/supported-functionality"
+        "getting-started/prompting-guide"
       ]
     },
     {
@@ -73,7 +71,6 @@
         "running-tasks/api-spec",
         "running-tasks/webhooks-faq",
         "running-tasks/visualizing-results",
-        "running-tasks/prompting-tips",
         "running-tasks/advanced-features"
       ]
     },
@@ -82,6 +79,7 @@
       "pages": [
         "workflows/introduction",
         "workflows/creating-workflows",
+        "workflows/getting-workflows",
         "workflows/running-workflows",
         "workflows/workflow-blocks"
       ]
@@ -89,12 +87,14 @@
     {
       "group": "Integrations",
       "pages": [
+        "integrations/api",
         "integrations/zapier",
         "integrations/make.com",
-        "integrations/api"
+        "integrations/workato"
       ]
     }
   ],
+  "feedback.thumbsRating": true,
   "footerSocials": {
     "twitter": "https://twitter.com/skyvernai",
     "github": "https://github.com/skyvern-ai/skyvern/",

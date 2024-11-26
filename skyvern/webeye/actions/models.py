@@ -39,6 +39,7 @@ class DetailedAgentStepOutput(BaseModel):
     actions: list[Action] | None
     action_results: list[ActionResult] | None
     actions_and_results: list[tuple[Action, list[ActionResult]]] | None
+    step_exception: str | None = None
 
     class Config:
         exclude = ["scraped_page", "extract_action_prompt"]
@@ -70,6 +71,7 @@ class DetailedAgentStepOutput(BaseModel):
             actions_and_results=None
             if self.actions_and_results is None
             else [(action, result) for action, result in self.actions_and_results if result],
+            step_exception=self.step_exception,
         )
 
     def to_agent_step_output(self) -> AgentStepOutput:

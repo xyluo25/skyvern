@@ -19,7 +19,7 @@ class StepStatus(StrEnum):
 
     def can_update_to(self, new_status: StepStatus) -> bool:
         allowed_transitions: dict[StepStatus, set[StepStatus]] = {
-            StepStatus.created: {StepStatus.running, StepStatus.canceled},
+            StepStatus.created: {StepStatus.running, StepStatus.failed, StepStatus.canceled},
             StepStatus.running: {StepStatus.completed, StepStatus.failed, StepStatus.canceled},
             StepStatus.failed: set(),
             StepStatus.completed: set(),
@@ -104,6 +104,14 @@ class Step(BaseModel):
 
         return False
 
+    def is_success(self) -> bool:
+        if self.status != StepStatus.completed:
+            return False
+        # TODO (kerem): Remove this check once we have backfilled all the steps
+        if self.output is None or self.output.actions_and_results is None:
+            return False
+        return True
+
     def is_terminated(self) -> bool:
         if self.status != StepStatus.completed:
             return False
@@ -131,6 +139,8 @@ class Organization(BaseModel):
     max_steps_per_run: int | None = None
     max_retries_per_step: int | None = None
     domain: str | None = None
+    bw_organization_id: str | None = None
+    bw_collection_ids: list[str] | None = None
 
     created_at: datetime
     modified_at: datetime

@@ -1,12 +1,21 @@
-from dataclasses import dataclass
-from typing import Any, Awaitable, Literal, Protocol
+from dataclasses import dataclass, field
+from typing import Any, Awaitable, Literal, Optional, Protocol, TypedDict
+
+from litellm import AllowedFailsPolicy
 
 from skyvern.forge.sdk.models import Step
 from skyvern.forge.sdk.settings_manager import SettingsManager
 
 
+class LiteLLMParams(TypedDict):
+    api_key: str | None
+    api_version: str | None
+    api_base: str | None
+    model_info: dict[str, Any] | None
+
+
 @dataclass(frozen=True)
-class LLMConfig:
+class LLMConfigBase:
     model_name: str
     required_env_vars: list[str]
     supports_vision: bool
@@ -23,16 +32,23 @@ class LLMConfig:
 
 
 @dataclass(frozen=True)
+class LLMConfig(LLMConfigBase):
+    litellm_params: Optional[LiteLLMParams] = field(default=None)
+    max_output_tokens: int = SettingsManager.get_settings().LLM_CONFIG_MAX_TOKENS
+
+
+@dataclass(frozen=True)
 class LLMRouterModelConfig:
     model_name: str
     # https://litellm.vercel.app/docs/routing
     litellm_params: dict[str, Any]
+    model_info: dict[str, Any] = field(default_factory=dict)
     tpm: int | None = None
     rpm: int | None = None
 
 
 @dataclass(frozen=True)
-class LLMRouterConfig(LLMConfig):
+class LLMRouterConfig(LLMConfigBase):
     model_list: list[LLMRouterModelConfig]
     # All three redis parameters are required. Even if there isn't a password, it should be an empty string.
     main_model_group: str
@@ -50,6 +66,11 @@ class LLMRouterConfig(LLMConfig):
     num_retries: int = 1
     retry_delay_seconds: int = 15
     set_verbose: bool = False
+    disable_cooldowns: bool | None = None
+    allowed_fails: int | None = None
+    allowed_fails_policy: AllowedFailsPolicy | None = None
+    cooldown_time: float | None = None
+    max_output_tokens: int = SettingsManager.get_settings().LLM_CONFIG_MAX_TOKENS
 
 
 class LLMAPIHandler(Protocol):

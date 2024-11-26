@@ -40,6 +40,8 @@ WORKFLOW_PARAMETER_PREFIX = "wp"
 AWS_SECRET_PARAMETER_PREFIX = "asp"
 OUTPUT_PARAMETER_PREFIX = "op"
 BITWARDEN_LOGIN_CREDENTIAL_PARAMETER_PREFIX = "blc"
+BITWARDEN_SENSITIVE_INFORMATION_PARAMETER_PREFIX = "bsi"
+BITWARDEN_CREDIT_CARD_DATA_PARAMETER_PREFIX = "bccd"
 TASK_GENERATION_PREFIX = "tg"
 
 
@@ -78,6 +80,16 @@ def generate_bitwarden_login_credential_parameter_id() -> str:
     return f"{BITWARDEN_LOGIN_CREDENTIAL_PARAMETER_PREFIX}_{int_id}"
 
 
+def generate_bitwarden_sensitive_information_parameter_id() -> str:
+    int_id = generate_id()
+    return f"{BITWARDEN_SENSITIVE_INFORMATION_PARAMETER_PREFIX}_{int_id}"
+
+
+def generate_bitwarden_credit_card_data_parameter_id() -> str:
+    int_id = generate_id()
+    return f"{BITWARDEN_CREDIT_CARD_DATA_PARAMETER_PREFIX}_{int_id}"
+
+
 def generate_organization_auth_token_id() -> str:
     int_id = generate_id()
     return f"{ORGANIZATION_AUTH_TOKEN_PREFIX}_{int_id}"
@@ -111,6 +123,16 @@ def generate_user_id() -> str:
 def generate_task_generation_id() -> str:
     int_id = generate_id()
     return f"{TASK_GENERATION_PREFIX}_{int_id}"
+
+
+def generate_totp_code_id() -> str:
+    int_id = generate_id()
+    return f"totp_{int_id}"
+
+
+def generate_action_id() -> str:
+    int_id = generate_id()
+    return f"a_{int_id}"
 
 
 def generate_id() -> int:

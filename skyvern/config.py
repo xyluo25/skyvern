@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from skyvern import constants
 from skyvern.constants import SKYVERN_DIR
 
 
@@ -12,9 +13,12 @@ class Settings(BaseSettings):
     MAX_SCRAPING_RETRIES: int = 0
     VIDEO_PATH: str | None = None
     HAR_PATH: str | None = "./har"
+    LOG_PATH: str = "./log"
+    TEMP_PATH: str = "./temp"
     BROWSER_ACTION_TIMEOUT_MS: int = 5000
     BROWSER_SCREENSHOT_TIMEOUT_MS: int = 20000
     BROWSER_LOADING_TIMEOUT_MS: int = 120000
+    OPTION_LOADING_TIMEOUT_MS: int = 600000
     MAX_STEPS_PER_RUN: int = 75
     MAX_NUM_SCREENSHOTS: int = 10
     # Ratio should be between 0 and 1.
@@ -23,7 +27,8 @@ class Settings(BaseSettings):
     MAX_RETRIES_PER_STEP: int = 5
     DEBUG_MODE: bool = False
     DATABASE_STRING: str = "postgresql+psycopg://skyvern@localhost/skyvern"
-    PROMPT_ACTION_HISTORY_WINDOW: int = 5
+    DATABASE_STATEMENT_TIMEOUT_MS: int = 60000
+    PROMPT_ACTION_HISTORY_WINDOW: int = 1
     TASK_RESPONSE_ACTION_SCREENSHOT_COUNT: int = 3
 
     ENV: str = "local"
@@ -31,22 +36,31 @@ class Settings(BaseSettings):
     JSON_LOGGING: bool = False
     LOG_LEVEL: str = "INFO"
     PORT: int = 8000
+    ALLOWED_ORIGINS: list[str] = ["*"]
+    BLOCKED_HOSTS: list[str] = ["localhost"]
 
     # Secret key for JWT. Please generate your own secret key in production
-    SECRET_KEY: str = "RX1NvhujcJqBPi8O78-7aSfJEWuT86-fll4CzKc_uek"
+    SECRET_KEY: str = "PLACEHOLDER"
     # Algorithm used to sign the JWT
     SIGNATURE_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # one week
 
-    SKYVERN_API_KEY: str = "SKYVERN_API_KEY"
+    SKYVERN_API_KEY: str = "PLACEHOLDER"
 
     # Artifact storage settings
     ARTIFACT_STORAGE_PATH: str = f"{SKYVERN_DIR}/artifacts"
     GENERATE_PRESIGNED_URLS: bool = False
+    AWS_S3_BUCKET_ARTIFACTS: str = "skyvern-artifacts"
+    AWS_S3_BUCKET_SCREENSHOTS: str = "skyvern-screenshots"
+    AWS_S3_BUCKET_BROWSER_SESSIONS: str = "skyvern-browser-sessions"
+
+    # Supported storage types: local, s3
+    SKYVERN_STORAGE_TYPE: str = "local"
 
     # S3 bucket settings
     AWS_REGION: str = "us-east-1"
     AWS_S3_BUCKET_UPLOADS: str = "skyvern-uploads"
+    MAX_UPLOAD_FILE_SIZE: int = 10 * 1024 * 1024  # 10 MB
 
     SKYVERN_TELEMETRY: bool = True
     ANALYTICS_ID: str = "anonymous"
@@ -59,12 +73,26 @@ class Settings(BaseSettings):
 
     # Workflow constant parameters
     WORKFLOW_DOWNLOAD_DIRECTORY_PARAMETER_KEY: str = "SKYVERN_DOWNLOAD_DIRECTORY"
+    WORKFLOW_WAIT_BLOCK_MAX_SEC: int = 30 * 60
+
+    # Saved browser session settings
+    BROWSER_SESSION_BASE_PATH: str = f"{constants.REPO_ROOT_DIR}/browser_sessions"
+
+    #####################
+    # Bitwarden Configs #
+    #####################
+    BITWARDEN_TIMEOUT_SECONDS: int = 60
+    BITWARDEN_MAX_RETRIES: int = 1
+
+    # task generation settings
+    PROMPT_CACHE_WINDOW_HOURS: int = 24
 
     #####################
     # LLM Configuration #
     #####################
     # ACTIVE LLM PROVIDER
     LLM_KEY: str = "OPENAI_GPT4O"
+    SECONDARY_LLM_KEY: str | None = None
     # COMMON
     LLM_CONFIG_TIMEOUT: int = 300
     LLM_CONFIG_MAX_TOKENS: int = 4096
@@ -73,6 +101,7 @@ class Settings(BaseSettings):
     ENABLE_OPENAI: bool = False
     ENABLE_ANTHROPIC: bool = False
     ENABLE_AZURE: bool = False
+    ENABLE_AZURE_GPT4O_MINI: bool = False
     ENABLE_BEDROCK: bool = False
     # OPENAI
     OPENAI_API_KEY: str | None = None
@@ -83,6 +112,19 @@ class Settings(BaseSettings):
     AZURE_API_KEY: str | None = None
     AZURE_API_BASE: str | None = None
     AZURE_API_VERSION: str | None = None
+
+    # AZURE GPT-4o mini
+    AZURE_GPT4O_MINI_DEPLOYMENT: str | None = None
+    AZURE_GPT4O_MINI_API_KEY: str | None = None
+    AZURE_GPT4O_MINI_API_BASE: str | None = None
+    AZURE_GPT4O_MINI_API_VERSION: str | None = None
+
+    # TOTP Settings
+    TOTP_LIFESPAN_MINUTES: int = 10
+    VERIFICATION_CODE_INITIAL_WAIT_TIME_SECS: int = 40
+    VERIFICATION_CODE_POLLING_TIMEOUT_MINS: int = 5
+
+    SVG_MAX_LENGTH: int = 100000
 
     def is_cloud_environment(self) -> bool:
         """

@@ -13,6 +13,11 @@ class SkyvernHTTPException(SkyvernException):
         super().__init__(message)
 
 
+class DisabledBlockExecutionError(SkyvernHTTPException):
+    def __init__(self, message: str | None = None):
+        super().__init__(message, status_code=status.HTTP_400_BAD_REQUEST)
+
+
 class InvalidOpenAIResponseFormat(SkyvernException):
     def __init__(self, message: str | None = None):
         super().__init__(f"Invalid response format: {message}")
@@ -47,17 +52,17 @@ class ScriptNotFound(SkyvernException):
 
 
 class MissingElement(SkyvernException):
-    def __init__(self, xpath: str | None = None, element_id: str | None = None):
+    def __init__(self, selector: str | None = None, element_id: str | None = None):
         super().__init__(
             f"Found no elements. Might be due to previous actions which removed this element."
-            f" xpath={xpath} element_id={element_id}",
+            f" selector={selector} element_id={element_id}",
         )
 
 
 class MultipleElementsFound(SkyvernException):
-    def __init__(self, num: int, xpath: str | None = None, element_id: str | None = None):
+    def __init__(self, num: int, selector: str | None = None, element_id: str | None = None):
         super().__init__(
-            f"Found {num} elements. Expected 1. num_elements={num} xpath={xpath} element_id={element_id}",
+            f"Found {num} elements. Expected 1. num_elements={num} selector={selector} element_id={element_id}",
         )
 
 
@@ -72,8 +77,10 @@ class ImaginaryFileUrl(SkyvernException):
 
 
 class MissingBrowserState(SkyvernException):
-    def __init__(self, task_id: str) -> None:
-        super().__init__(f"Browser state for task {task_id} is missing.")
+    def __init__(self, task_id: str | None = None, workflow_run_id: str | None = None) -> None:
+        task_str = f"task_id={task_id}" if task_id else ""
+        workflow_run_str = f"workflow_run_id={workflow_run_id}" if workflow_run_id else ""
+        super().__init__(f"Browser state for {task_str} {workflow_run_str} is missing.")
 
 
 class MissingBrowserStatePage(SkyvernException):
@@ -138,12 +145,7 @@ class WorkflowRunNotFound(SkyvernException):
         super().__init__(f"WorkflowRun {workflow_run_id} not found")
 
 
-class WorkflowOrganizationMismatch(SkyvernException):
-    def __init__(self, workflow_id: str, organization_id: str) -> None:
-        super().__init__(f"Workflow {workflow_id} does not belong to organization {organization_id}")
-
-
-class MissingValueForParameter(SkyvernException):
+class MissingValueForParameter(SkyvernHTTPException):
     def __init__(self, parameter_key: str, workflow_id: str, workflow_run_id: str) -> None:
         super().__init__(
             f"Missing value for parameter {parameter_key} in workflow run {workflow_run_id} of workflow {workflow_id}"
@@ -278,6 +280,20 @@ class BitwardenLogoutError(BitwardenBaseError):
         super().__init__(f"Error logging out of Bitwarden: {message}")
 
 
+class BitwardenSyncError(BitwardenBaseError):
+    def __init__(self, message: str) -> None:
+        super().__init__(f"Error syncing Bitwarden: {message}")
+
+
+class BitwardenAccessDeniedError(BitwardenBaseError):
+    def __init__(self) -> None:
+        super().__init__(
+            "Current organization does not have access to the specified Bitwarden collection. "
+            "Contact Skyvern support to enable access. This is a security layer on top of Bitwarden, "
+            "Skyvern team needs to let your Skyvern account access the Bitwarden collection."
+        )
+
+
 class UnknownElementTreeFormat(SkyvernException):
     def __init__(self, fmt: str) -> None:
         super().__init__(f"Unknown element tree format {fmt}")
@@ -291,6 +307,11 @@ class StepTerminationError(SkyvernException):
 class StepUnableToExecuteError(SkyvernException):
     def __init__(self, step_id: str, reason: str) -> None:
         super().__init__(f"Step {step_id} cannot be executed and task execution is stopped. Reason: {reason}")
+
+
+class SVGConversionFailed(SkyvernException):
+    def __init__(self, svg_html: str) -> None:
+        super().__init__(f"Failed to convert SVG after max retries. svg_html={svg_html}")
 
 
 class UnsupportedActionType(SkyvernException):
@@ -308,9 +329,14 @@ class ElementIsNotLabel(SkyvernException):
         super().__init__(f"<{tag_name}> element is not <label>")
 
 
+class NoneFrameError(SkyvernException):
+    def __init__(self, frame_id: str):
+        super().__init__(f"frame content is none. frame_id={frame_id}")
+
+
 class MissingElementDict(SkyvernException):
     def __init__(self, element_id: str) -> None:
-        super().__init__(f"Found no element in the dict. element_id={element_id}")
+        super().__init__(f"Invalid element id. element_id={element_id}")
 
 
 class MissingElementInIframe(SkyvernException):
@@ -318,11 +344,21 @@ class MissingElementInIframe(SkyvernException):
         super().__init__(f"Found no iframe includes the element. element_id={element_id}")
 
 
+class MissingElementInCSSMap(SkyvernException):
+    def __init__(self, element_id: str) -> None:
+        super().__init__(f"Found no css selector in the CSS map for the element. element_id={element_id}")
+
+
 class InputActionOnSelect2Dropdown(SkyvernException):
     def __init__(self, element_id: str):
         super().__init__(
             f"Input action on a select element, please try to use select action on this element. element_id={element_id}"
         )
+
+
+class FailToClick(SkyvernException):
+    def __init__(self, element_id: str, msg: str, anchor: str = "self"):
+        super().__init__(f"Failed to click({anchor}). element_id={element_id}, error_msg={msg}")
 
 
 class FailToSelectByLabel(SkyvernException):
@@ -362,3 +398,147 @@ class TaskAlreadyCanceled(SkyvernHTTPException):
 class InvalidTaskStatusTransition(SkyvernHTTPException):
     def __init__(self, old_status: str, new_status: str, task_id: str):
         super().__init__(f"Invalid task status transition from {old_status} to {new_status} for {task_id}")
+
+
+class ErrFoundSelectableElement(SkyvernException):
+    def __init__(self, element_id: str, err: Exception):
+        super().__init__(
+            f"error when selecting elements in the children list. element_id={element_id}, error={repr(err)}"
+        )
+
+
+class NoSelectableElementFound(SkyvernException):
+    def __init__(self, element_id: str):
+        super().__init__(f"No selectable elements found in the children list. element_id={element_id}")
+
+
+class HttpException(SkyvernException):
+    def __init__(self, status_code: int, url: str, msg: str | None = None) -> None:
+        super().__init__(f"HTTP Exception, status_code={status_code}, url={url}" + (f", msg={msg}" if msg else ""))
+
+
+class WrongElementToUploadFile(SkyvernException):
+    def __init__(self, element_id: str):
+        super().__init__(
+            f"No file chooser dialog opens, so file can't be uploaded through element {element_id}. Please try to upload again with another element."
+        )
+
+
+class FailedToFetchSecret(SkyvernException):
+    def __init__(self) -> None:
+        super().__init__("Failed to get the actual value of the secret parameter")
+
+
+class NoIncrementalElementFoundForCustomSelection(SkyvernException):
+    def __init__(self, element_id: str) -> None:
+        super().__init__(
+            f"No incremental element found, maybe try an input action or taking the select action on other elements. element_id={element_id}"
+        )
+
+
+class NoAvailableOptionFoundForCustomSelection(SkyvernException):
+    def __init__(self, reason: str | None) -> None:
+        super().__init__(f"No available option to select. reason: {reason}.")
+
+
+class NoElementMatchedForTargetOption(SkyvernException):
+    def __init__(self, target: str, reason: str | None) -> None:
+        super().__init__(
+            f"No element matches for the target value, try another value. reason: {reason}.  target_value='{target}'."
+        )
+
+
+class NoElementBoudingBox(SkyvernException):
+    def __init__(self, element_id: str) -> None:
+        super().__init__(f"Element does not have a bounding box. element_id={element_id}")
+
+
+class NoIncrementalElementFoundForAutoCompletion(SkyvernException):
+    def __init__(self, element_id: str, text: str) -> None:
+        super().__init__(f"No auto completion shown up after fill in [{text}]. element_id={element_id}")
+
+
+class NoSuitableAutoCompleteOption(SkyvernException):
+    def __init__(self, reasoning: str | None, target_value: str) -> None:
+        super().__init__(
+            f"No suitable auto complete option to choose. target_value={target_value}, reasoning={reasoning}"
+        )
+
+
+class NoAutoCompleteOptionMeetCondition(SkyvernException):
+    def __init__(
+        self, reasoning: str | None, required_relevance: float, target_value: str, closest_relevance: float
+    ) -> None:
+        super().__init__(
+            f"No auto complete option meet the condition(relevance_float>{required_relevance}). reasoning={reasoning}, target_value={target_value}, closest_relevance={closest_relevance}"
+        )
+
+
+class ErrEmptyTweakValue(SkyvernException):
+    def __init__(self, reasoning: str | None, current_value: str) -> None:
+        super().__init__(
+            f"Empty tweaked value for the current value. reasoning={reasoning}, current_value={current_value}"
+        )
+
+
+class FailToFindAutocompleteOption(SkyvernException):
+    def __init__(self, current_value: str) -> None:
+        super().__init__(
+            f"Can't find a suitable auto completion for the current value, maybe retry with another reasonable value. current_value={current_value}"
+        )
+
+
+class IllegitComplete(SkyvernException):
+    def __init__(self, data: dict | None = None) -> None:
+        data_str = f", data={data}" if data else ""
+        super().__init__(f"Illegit complete{data_str}")
+
+
+class CachedActionPlanError(SkyvernException):
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
+class InvalidUrl(SkyvernHTTPException):
+    def __init__(self, url: str) -> None:
+        super().__init__(
+            f"Invalid URL: {url}. Skyvern supports HTTP and HTTPS urls.", status_code=status.HTTP_400_BAD_REQUEST
+        )
+
+
+class BlockedHost(SkyvernHTTPException):
+    def __init__(self, host: str) -> None:
+        super().__init__(
+            f"The host in your url is blocked: {host}",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class InvalidWorkflowParameter(SkyvernHTTPException):
+    def __init__(self, expected_parameter_type: str, value: str, workflow_permanent_id: str | None = None) -> None:
+        message = f"Invalid workflow parameter. Expected parameter type: {expected_parameter_type}. Value: {value}."
+        if workflow_permanent_id:
+            message += f" Workflow permanent id: {workflow_permanent_id}"
+        super().__init__(
+            message,
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class InteractWithDisabledElement(SkyvernException):
+    def __init__(self, element_id: str):
+        super().__init__(
+            f"The element(id={element_id}) now is disabled, try to interact with it later when it's enabled."
+        )
+
+
+class FailedToParseActionInstruction(SkyvernException):
+    def __init__(self, reason: str | None, error_type: str | None):
+        super().__init__(
+            f"Failed to parse the action instruction as '{reason}({error_type})'",
+        )
+
+
+class UnsupportedTaskType(SkyvernException):
+    def __init__(self, task_type: str):
+        super().__init__(f"Not supported task type [{task_type}]")

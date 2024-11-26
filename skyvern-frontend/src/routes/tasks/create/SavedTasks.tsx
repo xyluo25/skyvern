@@ -1,6 +1,5 @@
 import { getClient } from "@/api/AxiosClient";
 import { queryClient } from "@/api/QueryClient";
-import { WorkflowApiResponse } from "@/api/types";
 import {
   Card,
   CardContent,
@@ -15,6 +14,13 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { stringify as convertToYAML } from "yaml";
 import { SavedTaskCard } from "./SavedTaskCard";
+import { useState } from "react";
+import { cn } from "@/util/utils";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  TaskBlock,
+  WorkflowApiResponse,
+} from "@/routes/workflows/types/workflowTypes";
 
 function createEmptyTaskTemplate() {
   return {
@@ -49,9 +55,12 @@ function createEmptyTaskTemplate() {
 function SavedTasks() {
   const credentialGetter = useCredentialGetter();
   const navigate = useNavigate();
+  const [hovering, setHovering] = useState(false);
 
-  const { data } = useQuery<Array<WorkflowApiResponse>>({
-    queryKey: ["workflows"],
+  const { data, isLoading: savedTasksIsLoading } = useQuery<
+    Array<WorkflowApiResponse>
+  >({
+    queryKey: ["savedTasks"],
     queryFn: async () => {
       const client = await getClient(credentialGetter);
       return client
@@ -86,11 +95,12 @@ function SavedTasks() {
     },
     onSuccess: (response) => {
       toast({
+        variant: "success",
         title: "New template created",
         description: "Your template was created successfully",
       });
       queryClient.invalidateQueries({
-        queryKey: ["workflows"],
+        queryKey: ["savedTasks"],
       });
       navigate(`/create/${response.workflow_permanent_id}`);
     },
@@ -99,34 +109,60 @@ function SavedTasks() {
   return (
     <div className="grid grid-cols-4 gap-4">
       <Card
-        onClick={() => {
-          if (mutation.isPending) {
-            return;
-          }
-          mutation.mutate();
-        }}
+        className="border-0"
+        onMouseEnter={() => setHovering(true)}
+        onMouseLeave={() => setHovering(false)}
+        onMouseOver={() => setHovering(true)}
+        onMouseOut={() => setHovering(false)}
       >
-        <CardHeader>
-          <CardTitle>New Template</CardTitle>
-          <CardDescription className="whitespace-nowrap overflow-hidden text-ellipsis">
-            Create your own template
-          </CardDescription>
+        <CardHeader
+          className={cn("rounded-t-md bg-slate-elevation1", {
+            "bg-slate-900": hovering,
+          })}
+        >
+          <CardTitle className="font-normal">New Task</CardTitle>
+          <CardDescription>{"https://.."}</CardDescription>
         </CardHeader>
-        <CardContent className="flex h-48 justify-center items-center hover:bg-muted/40 cursor-pointer">
-          {!mutation.isPending && <PlusIcon className="w-12 h-12" />}
+        <CardContent
+          className={cn(
+            "flex h-36 cursor-pointer items-center justify-center rounded-b-md bg-slate-elevation3 p-4 text-sm text-slate-300",
+            {
+              "bg-slate-800": hovering,
+            },
+          )}
+          onClick={() => {
+            if (mutation.isPending) {
+              return;
+            }
+            mutation.mutate();
+          }}
+        >
+          {!mutation.isPending && <PlusIcon className="h-12 w-12" />}
           {mutation.isPending && (
-            <ReloadIcon className="animate-spin w-12 h-12" />
+            <ReloadIcon className="h-12 w-12 animate-spin" />
           )}
         </CardContent>
       </Card>
+      {savedTasksIsLoading && (
+        <>
+          <Skeleton className="h-56" />
+          <Skeleton className="h-56" />
+          <Skeleton className="h-56" />
+        </>
+      )}
       {data?.map((workflow) => {
+        const firstBlock = workflow.workflow_definition.blocks[0];
+        if (!firstBlock || firstBlock.block_type !== "task") {
+          return null; // saved tasks have only one block and it's a task
+        }
+        const task = firstBlock as TaskBlock;
         return (
           <SavedTaskCard
             key={workflow.workflow_permanent_id}
             workflowId={workflow.workflow_permanent_id}
             title={workflow.title}
             description={workflow.description}
-            url={workflow.workflow_definition.blocks[0]?.url ?? ""}
+            url={task.url ?? ""}
           />
         );
       })}

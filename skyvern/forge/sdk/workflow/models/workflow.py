@@ -14,6 +14,8 @@ class WorkflowRequestBody(BaseModel):
     data: dict[str, Any] | None = None
     proxy_location: ProxyLocation | None = None
     webhook_callback_url: str | None = None
+    totp_verification_url: str | None = None
+    totp_identifier: str | None = None
 
 
 class RunWorkflowResponse(BaseModel):
@@ -49,6 +51,9 @@ class Workflow(BaseModel):
     workflow_definition: WorkflowDefinition
     proxy_location: ProxyLocation | None = None
     webhook_callback_url: str | None = None
+    totp_verification_url: str | None = None
+    totp_identifier: str | None = None
+    persist_browser_session: bool = False
 
     created_at: datetime
     modified_at: datetime
@@ -57,18 +62,35 @@ class Workflow(BaseModel):
 
 class WorkflowRunStatus(StrEnum):
     created = "created"
+    queued = "queued"
     running = "running"
     failed = "failed"
     terminated = "terminated"
+    canceled = "canceled"
+    timed_out = "timed_out"
     completed = "completed"
+
+    def is_final(self) -> bool:
+        return self in [
+            WorkflowRunStatus.failed,
+            WorkflowRunStatus.terminated,
+            WorkflowRunStatus.canceled,
+            WorkflowRunStatus.timed_out,
+            WorkflowRunStatus.completed,
+        ]
 
 
 class WorkflowRun(BaseModel):
     workflow_run_id: str
     workflow_id: str
+    workflow_permanent_id: str
+    organization_id: str
     status: WorkflowRunStatus
     proxy_location: ProxyLocation | None = None
     webhook_callback_url: str | None = None
+    totp_verification_url: str | None = None
+    totp_identifier: str | None = None
+    failure_reason: str | None = None
 
     created_at: datetime
     modified_at: datetime
@@ -92,8 +114,11 @@ class WorkflowRunStatusResponse(BaseModel):
     workflow_id: str
     workflow_run_id: str
     status: WorkflowRunStatus
+    failure_reason: str | None = None
     proxy_location: ProxyLocation | None = None
     webhook_callback_url: str | None = None
+    totp_verification_url: str | None = None
+    totp_identifier: str | None = None
     created_at: datetime
     modified_at: datetime
     parameters: dict[str, Any]

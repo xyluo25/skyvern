@@ -6,10 +6,13 @@ export const ArtifactType = {
   LLMResponseParsed: "llm_response_parsed",
   VisibleElementsTree: "visible_elements_tree",
   VisibleElementsTreeTrimmed: "visible_elements_tree_trimmed",
+  VisibleElementsTreeInPrompt: "visible_elements_tree_in_prompt",
   LLMPrompt: "llm_prompt",
   LLMRequest: "llm_request",
   HTMLScrape: "html_scrape",
 } as const;
+
+export type ArtifactType = (typeof ArtifactType)[keyof typeof ArtifactType];
 
 export const Status = {
   Created: "created",
@@ -24,7 +27,16 @@ export const Status = {
 
 export type Status = (typeof Status)[keyof typeof Status];
 
-export type ArtifactType = (typeof ArtifactType)[keyof typeof ArtifactType];
+export const ProxyLocation = {
+  Residential: "RESIDENTIAL",
+  ResidentialIE: "RESIDENTIAL_IE",
+  ResidentialES: "RESIDENTIAL_ES",
+  ResidentialIN: "RESIDENTIAL_IN",
+  ResidentialJP: "RESIDENTIAL_JP",
+  None: "NONE",
+} as const;
+
+export type ProxyLocation = (typeof ProxyLocation)[keyof typeof ProxyLocation];
 
 export type ArtifactApiResponse = {
   created_at: string;
@@ -66,26 +78,32 @@ export type StepApiResponse = {
 };
 
 export type TaskApiResponse = {
-  request: {
-    title: string | null;
-    url: string;
-    webhook_callback_url: string;
-    navigation_goal: string | null;
-    data_extraction_goal: string | null;
-    navigation_payload: string | object; // stringified JSON
-    error_code_mapping: null;
-    proxy_location: string;
-    extracted_information_schema: string | object;
-  };
+  request: CreateTaskRequest;
   task_id: string;
   status: Status;
   created_at: string; // ISO 8601
   modified_at: string; // ISO 8601
-  extracted_information: unknown;
+  extracted_information: Record<string, unknown> | string | null;
   screenshot_url: string | null;
   recording_url: string | null;
   failure_reason: string | null;
-  errors: unknown[];
+  errors: Array<Record<string, unknown>>;
+  max_steps_per_run: number | null;
+  workflow_run_id: string | null;
+};
+
+export type CreateTaskRequest = {
+  title: string | null;
+  url: string;
+  webhook_callback_url: string | null;
+  navigation_goal: string | null;
+  data_extraction_goal: string | null;
+  navigation_payload: Record<string, unknown> | string | null;
+  extracted_information_schema: Record<string, unknown> | string | null;
+  error_code_mapping: Record<string, string> | null;
+  proxy_location: ProxyLocation | null;
+  totp_verification_url: string | null;
+  totp_identifier: string | null;
 };
 
 export type User = {
@@ -112,53 +130,6 @@ export type ApiKeyApiResponse = {
   valid: boolean;
 };
 
-export type WorkflowParameter = {
-  workflow_parameter_id: string;
-  workflow_parameter_type?: string;
-  key: string;
-  description: string | null;
-  workflow_id: string;
-  parameter_type: "workflow"; // TODO other values
-  default_value?: string;
-  created_at: string | null;
-  modified_at: string | null;
-  deleted_at: string | null;
-};
-
-export type WorkflowBlock = {
-  label: string;
-  block_type: string;
-  output_parameter?: null;
-  continue_on_failure: boolean;
-  url: string;
-  title: string;
-  navigation_goal: string;
-  data_extraction_goal: string;
-  data_schema: object | null;
-  error_code_mapping: null; // ?
-  max_retries: number | null;
-  max_steps_per_run: number | null;
-  parameters: []; // ?
-};
-
-export type WorkflowApiResponse = {
-  workflow_id: string;
-  organization_id: string;
-  title: string;
-  workflow_permanent_id: string;
-  version: number;
-  description: string;
-  workflow_definition: {
-    parameters: Array<WorkflowParameter>;
-    blocks: Array<WorkflowBlock>;
-  };
-  proxy_location: string;
-  webhook_callback_url: string;
-  created_at: string;
-  modified_at: string;
-  deleted_at: string | null;
-};
-
 // TODO complete this
 export const ActionTypes = {
   InputText: "input_text",
@@ -166,6 +137,9 @@ export const ActionTypes = {
   SelectOption: "select_option",
   UploadFile: "upload_file",
   complete: "complete",
+  wait: "wait",
+  terminate: "terminate",
+  SolveCaptcha: "solve_captcha",
 } as const;
 
 export type ActionType = (typeof ActionTypes)[keyof typeof ActionTypes];
@@ -178,6 +152,9 @@ export const ReadableActionTypes: {
   select_option: "Select Option",
   upload_file: "Upload File",
   complete: "Complete",
+  wait: "Wait",
+  terminate: "Terminate",
+  solve_captcha: "Solve Captcha",
 };
 
 export type Option = {
@@ -203,4 +180,53 @@ export type Action = {
   success: boolean;
   stepId: string;
   index: number;
+};
+
+export type WorkflowRunApiResponse = {
+  workflow_permanent_id: string;
+  workflow_run_id: string;
+  workflow_id: string;
+  status: Status;
+  proxy_location: ProxyLocation | null;
+  webhook_callback_url: string;
+  created_at: string;
+  modified_at: string;
+};
+
+export type WorkflowRunStatusApiResponse = {
+  workflow_id: string;
+  workflow_run_id: string;
+  status: Status;
+  proxy_location: ProxyLocation | null;
+  webhook_callback_url: string | null;
+  created_at: string;
+  modified_at: string;
+  parameters: Record<string, unknown>;
+  screenshot_urls: Array<string> | null;
+  recording_url: string | null;
+  outputs: Record<string, unknown> | null;
+  failure_reason: string | null;
+};
+
+export type TaskGenerationApiResponse = {
+  suggested_title: string | null;
+  url: string | null;
+  navigation_goal: string | null;
+  data_extraction_goal: string | null;
+  navigation_payload: Record<string, unknown> | null;
+  extracted_information_schema: Record<string, unknown> | null;
+};
+
+export type ActionsApiResponse = {
+  action_type: ActionType;
+  status: Status;
+  task_id: string | null;
+  step_id: string | null;
+  step_order: number | null;
+  action_order: number | null;
+  confidence_float: number | null;
+  description: string | null;
+  reasoning: string | null;
+  intention: string | null;
+  response: string | null;
 };

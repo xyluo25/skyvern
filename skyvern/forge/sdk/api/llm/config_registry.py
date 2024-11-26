@@ -6,7 +6,7 @@ from skyvern.forge.sdk.api.llm.exceptions import (
     MissingLLMProviderEnvVarsError,
     NoProviderEnabledError,
 )
-from skyvern.forge.sdk.api.llm.models import LLMConfig, LLMRouterConfig
+from skyvern.forge.sdk.api.llm.models import LiteLLMParams, LLMConfig, LLMRouterConfig
 from skyvern.forge.sdk.settings_manager import SettingsManager
 
 LOG = structlog.get_logger()
@@ -32,7 +32,7 @@ class LLMConfigRegistry:
 
         cls.validate_config(llm_key, config)
 
-        LOG.info("Registering LLM config", llm_key=llm_key)
+        LOG.debug("Registering LLM config", llm_key=llm_key)
         cls._configs[llm_key] = config
 
     @classmethod
@@ -49,6 +49,7 @@ if not any(
         SettingsManager.get_settings().ENABLE_OPENAI,
         SettingsManager.get_settings().ENABLE_ANTHROPIC,
         SettingsManager.get_settings().ENABLE_AZURE,
+        SettingsManager.get_settings().ENABLE_AZURE_GPT4O_MINI,
         SettingsManager.get_settings().ENABLE_BEDROCK,
     ]
 ):
@@ -75,7 +76,30 @@ if SettingsManager.get_settings().ENABLE_OPENAI:
         ),
     )
     LLMConfigRegistry.register_config(
-        "OPENAI_GPT4O", LLMConfig("gpt-4o", ["OPENAI_API_KEY"], supports_vision=True, add_assistant_prefix=False)
+        "OPENAI_GPT4O",
+        LLMConfig(
+            "gpt-4o", ["OPENAI_API_KEY"], supports_vision=True, add_assistant_prefix=False, max_output_tokens=16384
+        ),
+    )
+    LLMConfigRegistry.register_config(
+        "OPENAI_GPT4O_MINI",
+        LLMConfig(
+            "gpt-4o-mini",
+            ["OPENAI_API_KEY"],
+            supports_vision=True,
+            add_assistant_prefix=False,
+            max_output_tokens=16384,
+        ),
+    )
+    LLMConfigRegistry.register_config(
+        "OPENAI_GPT-4O-2024-08-06",
+        LLMConfig(
+            "gpt-4o-2024-08-06",
+            ["OPENAI_API_KEY"],
+            supports_vision=True,
+            add_assistant_prefix=False,
+            max_output_tokens=16384,
+        ),
     )
 
 
@@ -119,10 +143,11 @@ if SettingsManager.get_settings().ENABLE_ANTHROPIC:
     LLMConfigRegistry.register_config(
         "ANTHROPIC_CLAUDE3.5_SONNET",
         LLMConfig(
-            "anthropic/claude-3-5-sonnet-20240620",
+            "anthropic/claude-3-5-sonnet-latest",
             ["ANTHROPIC_API_KEY"],
             supports_vision=True,
             add_assistant_prefix=True,
+            max_output_tokens=8192,
         ),
     )
 
@@ -158,12 +183,31 @@ if SettingsManager.get_settings().ENABLE_BEDROCK:
     LLMConfigRegistry.register_config(
         "BEDROCK_ANTHROPIC_CLAUDE3.5_SONNET",
         LLMConfig(
+            "bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0",
+            ["AWS_REGION"],
+            supports_vision=True,
+            add_assistant_prefix=True,
+        ),
+    )
+    LLMConfigRegistry.register_config(
+        "BEDROCK_ANTHROPIC_CLAUDE3.5_SONNET_INFERENCE_PROFILE",
+        LLMConfig(
+            "bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+            ["AWS_REGION"],
+            supports_vision=True,
+            add_assistant_prefix=True,
+        ),
+    )
+    LLMConfigRegistry.register_config(
+        "BEDROCK_ANTHROPIC_CLAUDE3.5_SONNET_V1",
+        LLMConfig(
             "bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0",
             ["AWS_REGION"],
             supports_vision=True,
             add_assistant_prefix=True,
         ),
     )
+
 
 if SettingsManager.get_settings().ENABLE_AZURE:
     LLMConfigRegistry.register_config(
@@ -176,6 +220,28 @@ if SettingsManager.get_settings().ENABLE_AZURE:
                 "AZURE_API_BASE",
                 "AZURE_API_VERSION",
             ],
+            supports_vision=True,
+            add_assistant_prefix=False,
+        ),
+    )
+
+if SettingsManager.get_settings().ENABLE_AZURE_GPT4O_MINI:
+    LLMConfigRegistry.register_config(
+        "AZURE_OPENAI_GPT4O_MINI",
+        LLMConfig(
+            f"azure/{SettingsManager.get_settings().AZURE_GPT4O_MINI_DEPLOYMENT}",
+            [
+                "AZURE_GPT4O_MINI_DEPLOYMENT",
+                "AZURE_GPT4O_MINI_API_KEY",
+                "AZURE_GPT4O_MINI_API_BASE",
+                "AZURE_GPT4O_MINI_API_VERSION",
+            ],
+            litellm_params=LiteLLMParams(
+                api_base=SettingsManager.get_settings().AZURE_GPT4O_MINI_API_BASE,
+                api_key=SettingsManager.get_settings().AZURE_GPT4O_MINI_API_KEY,
+                api_version=SettingsManager.get_settings().AZURE_GPT4O_MINI_API_VERSION,
+                model_info={"model_name": "azure/gpt-4o-mini"},
+            ),
             supports_vision=True,
             add_assistant_prefix=False,
         ),

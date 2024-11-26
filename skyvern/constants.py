@@ -7,6 +7,13 @@ SKYVERN_DIR = Path(__file__).parent
 REPO_ROOT_DIR = SKYVERN_DIR.parent
 
 INPUT_TEXT_TIMEOUT = 120000  # 2 minutes
+PAGE_CONTENT_TIMEOUT = 300  # 5 mins
+BUILDING_ELEMENT_TREE_TIMEOUT_MS = 60 * 1000  # 1 minute
+BROWSER_CLOSE_TIMEOUT = 180  # 3 minute
+BROWSER_DOWNLOAD_TIMEOUT = 600  # 10 minute
+
+# reserved fields for navigation payload
+SPECIAL_FIELD_VERIFICATION_CODE = "verification_code"
 
 
 class ScrapeType(StrEnum):
@@ -15,4 +22,4 @@ class ScrapeType(StrEnum):
     RELOAD = "reload"
 
 
-SCRAPE_TYPE_ORDER = [ScrapeType.NORMAL, ScrapeType.STOPLOADING, ScrapeType.RELOAD]
+SCRAPE_TYPE_ORDER = [ScrapeType.NORMAL, ScrapeType.NORMAL, ScrapeType.RELOAD]

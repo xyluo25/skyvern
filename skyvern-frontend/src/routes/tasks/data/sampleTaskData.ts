@@ -1,11 +1,16 @@
+import { CreateNewTaskFormValues } from "../create/taskFormTypes";
 import { SampleCase } from "../types";
 
 export const blank = {
   url: "https://www.example.com",
-  navigationGoal: null,
-  dataExtractionGoal: null,
+  navigationGoal: "",
+  dataExtractionGoal: "",
   navigationPayload: null,
   extractedInformationSchema: null,
+  webhookCallbackUrl: null,
+  totpIdentifier: null,
+  totpVerificationUrl: null,
+  errorCodeMapping: null,
 };
 
 export const bci_seguros = {
@@ -30,6 +35,10 @@ export const bci_seguros = {
     "km approx a recorrer": "28,000",
   },
   extractedInformationSchema: null,
+  webhookCallbackUrl: null,
+  totpIdentifier: null,
+  totpVerificationUrl: null,
+  errorCodeMapping: null,
 };
 
 export const california_edd = {
@@ -47,6 +56,10 @@ export const california_edd = {
     phone_number: "412-444-1234",
   },
   extractedInformationSchema: null,
+  webhookCallbackUrl: null,
+  totpIdentifier: null,
+  totpVerificationUrl: null,
+  errorCodeMapping: null,
 };
 
 export const finditparts = {
@@ -59,6 +72,28 @@ export const finditparts = {
     product_id: "W01-377-8537",
   },
   extractedInformationSchema: null,
+  webhookCallbackUrl: null,
+  totpIdentifier: null,
+  totpVerificationUrl: null,
+  errorCodeMapping: null,
+};
+
+export const contact_us_forms = {
+  url: "https://canadahvac.com/contact-hvac-canada/",
+  navigationGoal:
+    "Fill out the contact us form and submit it. Your goal is complete when the page says your message has been sent.",
+  navigationPayload: {
+    name: "John Doe",
+    email: "john.doe@gmail.com",
+    phone: "123-456-7890",
+    message: "Hello, I have a question about your services.",
+  },
+  dataExtractionGoal: null,
+  extractedInformationSchema: null,
+  webhookCallbackUrl: null,
+  totpIdentifier: null,
+  totpVerificationUrl: null,
+  errorCodeMapping: null,
 };
 
 export const job_application = {
@@ -69,9 +104,16 @@ export const job_application = {
     name: "John Doe",
     email: "john.doe@gmail.com",
     phone: "123-456-7890",
-    resume_url: "https://www.msnlabs.com/img/resume-sample.pdf",
+    resume_url:
+      "https://writing.colostate.edu/guides/documents/resume/functionalSample.pdf",
     cover_letter: "Generate a compelling cover letter for me",
   },
+  dataExtractionGoal: null,
+  extractedInformationSchema: null,
+  webhookCallbackUrl: null,
+  totpIdentifier: null,
+  totpVerificationUrl: null,
+  errorCodeMapping: null,
 };
 
 export const geico = {
@@ -262,6 +304,79 @@ export const geico = {
     },
     type: "object",
   },
+  webhookCallbackUrl: null,
+  totpIdentifier: null,
+  totpVerificationUrl: null,
+  errorCodeMapping: null,
+};
+
+export const hackernews = {
+  url: "https://news.ycombinator.com",
+  navigationGoal:
+    "Navigate to the Hacker News homepage and identify the top post. COMPLETE when the title and URL of the top post are extracted. Ensure that the top post is the first post listed on the page.",
+  dataExtractionGoal:
+    "Extract the title and URL of the top post on the Hacker News homepage.",
+  navigationPayload: null,
+  extractedInformationSchema: null,
+  webhookCallbackUrl: null,
+  totpIdentifier: null,
+  totpVerificationUrl: null,
+  errorCodeMapping: null,
+};
+
+export const AAPLStockPrice = {
+  url: "https://www.google.com/finance",
+  navigationGoal:
+    "Navigate to the search bar on Google Finance, type 'AAPL', and press Enter. COMPLETE when the search results for AAPL are displayed and the stock price is extracted.",
+  dataExtractionGoal: "Extract the stock price for AAPL",
+  navigationPayload: null,
+  extractedInformationSchema: null,
+  webhookCallbackUrl: null,
+  totpIdentifier: null,
+  totpVerificationUrl: null,
+  errorCodeMapping: null,
+};
+
+export const NYTBestseller = {
+  url: "https://www.nytimes.com/books/best-sellers",
+  navigationGoal:
+    "Navigate to the NYT Bestsellers page and identify the top book listed. COMPLETE when the title and author of the top book are identified.",
+  dataExtractionGoal:
+    "Extract the title, author, and rating of the top NYT Bestseller from the page.",
+  navigationPayload: null,
+  extractedInformationSchema: null,
+  webhookCallbackUrl: null,
+  totpIdentifier: null,
+  totpVerificationUrl: null,
+  errorCodeMapping: null,
+};
+
+export const topRankedFootballTeam = {
+  url: "https://www.fifa.com/fifa-world-ranking/",
+  navigationGoal:
+    "Navigate to the FIFA World Ranking page and identify the top ranked football team. COMPLETE when the name of the top ranked football team is found and displayed.",
+  dataExtractionGoal:
+    "Extract the name of the top ranked football team from the FIFA World Ranking page.",
+  navigationPayload: null,
+  extractedInformationSchema: null,
+  webhookCallbackUrl: null,
+  totpIdentifier: null,
+  totpVerificationUrl: null,
+  errorCodeMapping: null,
+};
+
+export const extractIntegrationsFromGong = {
+  url: "https://www.gong.io",
+  navigationGoal:
+    "Navigate to the 'Integrations' page on the Gong website. COMPLETE when the page displaying a list of integrations is fully loaded. Ensure not to click on any external links or advertisements.",
+  dataExtractionGoal:
+    "Extract the names and descriptions of all integrations listed on the Gong integrations page.",
+  navigationPayload: null,
+  extractedInformationSchema: null,
+  webhookCallbackUrl: null,
+  totpIdentifier: null,
+  totpVerificationUrl: null,
+  errorCodeMapping: null,
 };
 
 export function getSample(sample: SampleCase) {
@@ -272,6 +387,9 @@ export function getSample(sample: SampleCase) {
     case "finditparts": {
       return finditparts;
     }
+    case "contact_us_forms": {
+      return contact_us_forms;
+    }
     case "california_edd": {
       return california_edd;
     }
@@ -279,7 +397,32 @@ export function getSample(sample: SampleCase) {
       return bci_seguros;
     }
     case "job_application": {
-      return job_application;
+      // copy the object to avoid modifying the original. Update job_application.navigationPayload.email to a random email
+      const email = generateUniqueEmail();
+      const phone = generatePhoneNumber();
+      return {
+        ...job_application,
+        navigationPayload: {
+          ...job_application.navigationPayload,
+          email,
+          phone,
+        },
+      };
+    }
+    case "hackernews": {
+      return hackernews;
+    }
+    case "AAPLStockPrice": {
+      return AAPLStockPrice;
+    }
+    case "NYTBestseller": {
+      return NYTBestseller;
+    }
+    case "topRankedFootballTeam": {
+      return topRankedFootballTeam;
+    }
+    case "extractIntegrationsFromGong": {
+      return extractIntegrationsFromGong;
     }
     case "blank": {
       return blank;
@@ -287,16 +430,45 @@ export function getSample(sample: SampleCase) {
   }
 }
 
-function transformKV([key, value]: [string, unknown]) {
-  if (value === null) {
-    return [key, ""];
+function generateUniqueEmail() {
+  // Define the characters to use for the random part
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  let randomString = "";
+
+  // Generate a random string of 8 characters
+  for (let i = 0; i < 8; i++) {
+    const randomIndex = Math.floor(Math.random() * chars.length);
+    randomString += chars[randomIndex];
   }
-  if (typeof value === "object") {
+
+  // Concatenate with '@example.com'
+  const email = randomString + "@example.com";
+  return email;
+}
+
+function generatePhoneNumber() {
+  let phoneNumber = "";
+
+  // The first digit should be between 1 and 9 (it can't be 0)
+  phoneNumber += Math.floor(Math.random() * 9) + 1;
+
+  // The remaining 9 digits can be between 0 and 9
+  for (let i = 0; i < 9; i++) {
+    phoneNumber += Math.floor(Math.random() * 10);
+  }
+
+  return phoneNumber;
+}
+
+function transformKV([key, value]: [string, unknown]) {
+  if (value !== null && typeof value === "object") {
     return [key, JSON.stringify(value, null, 2)];
   }
   return [key, value];
 }
 
-export function getSampleForInitialFormValues(sample: SampleCase) {
+export function getSampleForInitialFormValues(
+  sample: SampleCase,
+): CreateNewTaskFormValues {
   return Object.fromEntries(Object.entries(getSample(sample)).map(transformKV));
 }

@@ -2,9 +2,11 @@ import abc
 import json
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated, Literal, Union
+from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from skyvern.exceptions import InvalidWorkflowParameter
 
 
 class ParameterType(StrEnum):
@@ -12,6 +14,8 @@ class ParameterType(StrEnum):
     CONTEXT = "context"
     AWS_SECRET = "aws_secret"
     BITWARDEN_LOGIN_CREDENTIAL = "bitwarden_login_credential"
+    BITWARDEN_SENSITIVE_INFORMATION = "bitwarden_sensitive_information"
+    BITWARDEN_CREDIT_CARD_DATA = "bitwarden_credit_card_data"
     OUTPUT = "output"
 
 
@@ -61,26 +65,80 @@ class BitwardenLoginCredentialParameter(Parameter):
     deleted_at: datetime | None = None
 
 
+class BitwardenSensitiveInformationParameter(Parameter):
+    parameter_type: Literal[ParameterType.BITWARDEN_SENSITIVE_INFORMATION] = (
+        ParameterType.BITWARDEN_SENSITIVE_INFORMATION
+    )
+    # parameter fields
+    bitwarden_sensitive_information_parameter_id: str
+    workflow_id: str
+    # bitwarden cli required fields
+    bitwarden_client_id_aws_secret_key: str
+    bitwarden_client_secret_aws_secret_key: str
+    bitwarden_master_password_aws_secret_key: str
+    # bitwarden collection id to filter the Bitwarden Identity from
+    bitwarden_collection_id: str
+    # unique key to identify the Bitwarden Identity in the collection
+    # this has to be in the identity's name
+    bitwarden_identity_key: str
+    # fields to extract from the Bitwarden Identity. Custom fields are prioritized over default identity fields
+    bitwarden_identity_fields: list[str]
+
+    created_at: datetime
+    modified_at: datetime
+    deleted_at: datetime | None = None
+
+
+class BitwardenCreditCardDataParameter(Parameter):
+    model_config = ConfigDict(from_attributes=True)
+    parameter_type: Literal[ParameterType.BITWARDEN_CREDIT_CARD_DATA] = ParameterType.BITWARDEN_CREDIT_CARD_DATA
+    # parameter fields
+    bitwarden_credit_card_data_parameter_id: str
+    workflow_id: str
+    # bitwarden cli required fields
+    bitwarden_client_id_aws_secret_key: str
+    bitwarden_client_secret_aws_secret_key: str
+    bitwarden_master_password_aws_secret_key: str
+    # bitwarden ids for the credit card item
+    bitwarden_collection_id: str
+    bitwarden_item_id: str
+
+    created_at: datetime
+    modified_at: datetime
+    deleted_at: datetime | None = None
+
+
 class WorkflowParameterType(StrEnum):
     STRING = "string"
     INTEGER = "integer"
     FLOAT = "float"
     BOOLEAN = "boolean"
     JSON = "json"
+    FILE_URL = "file_url"
 
-    def convert_value(self, value: str | None) -> str | int | float | bool | dict | list | None:
+    def convert_value(self, value: Any) -> str | int | float | bool | dict | list | None:
         if value is None:
             return None
-        if self == WorkflowParameterType.STRING:
-            return value
-        elif self == WorkflowParameterType.INTEGER:
-            return int(value)
-        elif self == WorkflowParameterType.FLOAT:
-            return float(value)
-        elif self == WorkflowParameterType.BOOLEAN:
-            return value.lower() in ["true", "1"]
-        elif self == WorkflowParameterType.JSON:
-            return json.loads(value)
+        try:
+            if self == WorkflowParameterType.STRING:
+                return str(value)
+            elif self == WorkflowParameterType.INTEGER:
+                return int(value)
+            elif self == WorkflowParameterType.FLOAT:
+                return float(value)
+            elif self == WorkflowParameterType.BOOLEAN:
+                if isinstance(value, bool):
+                    return value
+                lower_case = str(value).lower()
+                if lower_case in ["true", "false", "1", "0"]:
+                    raise InvalidWorkflowParameter(expected_parameter_type=self, value=str(value))
+                return lower_case in ["true", "1"]
+            elif self == WorkflowParameterType.JSON:
+                return json.loads(value)
+            elif self == WorkflowParameterType.FILE_URL:
+                return value
+        except Exception:
+            raise InvalidWorkflowParameter(expected_parameter_type=self, value=str(value))
 
 
 class WorkflowParameter(Parameter):
@@ -121,6 +179,8 @@ ParameterSubclasses = Union[
     ContextParameter,
     AWSSecretParameter,
     BitwardenLoginCredentialParameter,
+    BitwardenSensitiveInformationParameter,
+    BitwardenCreditCardDataParameter,
     OutputParameter,
 ]
 PARAMETER_TYPE = Annotated[ParameterSubclasses, Field(discriminator="parameter_type")]

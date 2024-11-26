@@ -1,48 +1,23 @@
-import { Link, Outlet } from "react-router-dom";
 import { Toaster } from "@/components/ui/toaster";
-import { SideNav } from "./SideNav";
-import { DiscordLogoIcon, GitHubLogoIcon } from "@radix-ui/react-icons";
-import { Logo } from "@/components/Logo";
-import { Profile } from "./Profile";
-import { useContext } from "react";
-import { UserContext } from "@/store/UserContext";
+import { useSidebarStore } from "@/store/SidebarStore";
+import { cn } from "@/util/utils";
+import { Outlet } from "react-router-dom";
+import { Header } from "./Header";
+import { Sidebar } from "./Sidebar";
 
 function RootLayout() {
-  const user = useContext(UserContext);
+  const collapsed = useSidebarStore((state) => state.collapsed);
 
   return (
     <>
-      <div className="w-full h-full px-4">
-        <aside className="fixed w-72 px-6 shrink-0 min-h-screen border-r-2">
-          <Link to={window.location.origin}>
-            <div className="h-24">
-              <Logo />
-            </div>
-          </Link>
-          <SideNav />
-          {user ? (
-            <div className="absolute bottom-2 left-0 w-72 px-6 shrink-0">
-              <Profile name={user.name} />
-            </div>
-          ) : null}
-        </aside>
-        <div className="pl-72 h-24 flex justify-end items-center px-6 gap-4">
-          <Link
-            to="https://discord.com/invite/fG2XXEuQX3"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <DiscordLogoIcon className="w-6 h-6" />
-          </Link>
-          <Link
-            to="https://github.com/Skyvern-AI/skyvern"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <GitHubLogoIcon className="w-6 h-6" />
-          </Link>
-        </div>
-        <main className="pl-72">
+      <div className="h-full w-full">
+        <Sidebar />
+        <Header />
+        <main
+          className={cn("lg:pb-4 lg:pl-64", {
+            "lg:pl-28": collapsed,
+          })}
+        >
           <Outlet />
         </main>
       </div>

@@ -1,27 +1,49 @@
+import datetime
+import hashlib
+import uuid
 from typing import Annotated, Any
 
 import structlog
 import yaml
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.responses import ORJSONResponse
 from pydantic import BaseModel
+from sqlalchemy.exc import OperationalError
 
 from skyvern import analytics
 from skyvern.exceptions import StepNotFound
 from skyvern.forge import app
 from skyvern.forge.prompts import prompt_engine
+from skyvern.forge.sdk.api.aws import aws_client
 from skyvern.forge.sdk.api.llm.exceptions import LLMProviderError
 from skyvern.forge.sdk.artifact.models import Artifact, ArtifactType
 from skyvern.forge.sdk.core import skyvern_context
 from skyvern.forge.sdk.core.permissions.permission_checker_factory import PermissionCheckerFactory
 from skyvern.forge.sdk.core.security import generate_skyvern_signature
+from skyvern.forge.sdk.db.enums import OrganizationAuthTokenType
 from skyvern.forge.sdk.executor.factory import AsyncExecutorFactory
 from skyvern.forge.sdk.models import Organization, Step
-from skyvern.forge.sdk.schemas.organizations import OrganizationUpdate
+from skyvern.forge.sdk.schemas.organizations import (
+    GetOrganizationAPIKeysResponse,
+    GetOrganizationsResponse,
+    OrganizationUpdate,
+)
 from skyvern.forge.sdk.schemas.task_generations import GenerateTaskRequest, TaskGeneration, TaskGenerationBase
 from skyvern.forge.sdk.schemas.tasks import (
     CreateTaskResponse,
-    ProxyLocation,
+    OrderBy,
+    SortDirection,
     Task,
     TaskRequest,
     TaskResponse,
@@ -29,13 +51,20 @@ from skyvern.forge.sdk.schemas.tasks import (
 )
 from skyvern.forge.sdk.services import org_auth_service
 from skyvern.forge.sdk.settings_manager import SettingsManager
+from skyvern.forge.sdk.workflow.exceptions import (
+    FailedToCreateWorkflow,
+    FailedToUpdateWorkflow,
+    WorkflowParameterMissingRequiredValue,
+)
 from skyvern.forge.sdk.workflow.models.workflow import (
     RunWorkflowResponse,
     Workflow,
     WorkflowRequestBody,
+    WorkflowRun,
     WorkflowRunStatusResponse,
 )
 from skyvern.forge.sdk.workflow.models.yaml import WorkflowCreateYAMLRequest
+from skyvern.webeye.actions.actions import Action
 
 base_router = APIRouter()
 
@@ -97,6 +126,7 @@ async def check_server_status() -> Response:
     include_in_schema=False,
 )
 async def create_agent_task(
+    request: Request,
     background_tasks: BackgroundTasks,
     task: TaskRequest,
     current_org: Organization = Depends(org_auth_service.get_current_org),
@@ -106,13 +136,16 @@ async def create_agent_task(
     analytics.capture("skyvern-oss-agent-task-create", data={"url": task.url})
     await PermissionCheckerFactory.get_instance().check(current_org)
 
-    if current_org and current_org.organization_name == "CoverageCat":
-        task.proxy_location = ProxyLocation.RESIDENTIAL
-
     created_task = await app.agent.create_task(task, current_org.organization_id)
     if x_max_steps_override:
-        LOG.info("Overriding max steps per run", max_steps_override=x_max_steps_override)
+        LOG.info(
+            "Overriding max steps per run",
+            max_steps_override=x_max_steps_override,
+            organization_id=current_org.organization_id,
+            task_id=created_task.task_id,
+        )
     await AsyncExecutorFactory.get_executor().execute_task(
+        request=request,
         background_tasks=background_tasks,
         task_id=created_task.task_id,
         organization_id=current_org.organization_id,
@@ -244,6 +277,15 @@ async def get_task(
     if recording_artifact:
         recording_url = await app.ARTIFACT_MANAGER.get_share_link(recording_artifact)
 
+    browser_console_log = await app.DATABASE.get_latest_artifact(
+        task_id=task_obj.task_id,
+        artifact_types=[ArtifactType.BROWSER_CONSOLE_LOG],
+        organization_id=current_org.organization_id,
+    )
+    browser_console_log_url = None
+    if browser_console_log:
+        browser_console_log_url = await app.ARTIFACT_MANAGER.get_share_link(browser_console_log)
+
     # get the artifact of the last  screenshot and get the screenshot_url
     latest_action_screenshot_artifacts = await app.DATABASE.get_latest_n_artifacts(
         task_id=task_obj.task_id,
@@ -261,22 +303,28 @@ async def get_task(
             task_status=task_obj.status,
         )
 
-    failure_reason = None
+    failure_reason: str | None = None
     if task_obj.status == TaskStatus.failed and (latest_step.output or task_obj.failure_reason):
         failure_reason = ""
         if task_obj.failure_reason:
-            failure_reason += f"Reasoning: {task_obj.failure_reason or ''}"
-            failure_reason += "\n"
-        if latest_step.output and latest_step.output.action_results:
-            failure_reason += "Exceptions: "
-            failure_reason += str(
-                [f"[{ar.exception_type}]: {ar.exception_message}" for ar in latest_step.output.action_results]
-            )
+            failure_reason += task_obj.failure_reason or ""
+        if latest_step.output is not None and latest_step.output.actions_and_results is not None:
+            action_results_string: list[str] = []
+            for action, results in latest_step.output.actions_and_results:
+                if len(results) == 0:
+                    continue
+                if results[-1].success:
+                    continue
+                action_results_string.append(f"{action.action_type} action failed.")
+
+            if len(action_results_string) > 0:
+                failure_reason += "(Exceptions: " + str(action_results_string) + ")"
 
     return task_obj.to_task_response(
         action_screenshot_urls=latest_action_screenshot_urls,
         screenshot_url=screenshot_url,
         recording_url=recording_url,
+        browser_console_log_url=browser_console_log_url,
         failure_reason=failure_reason,
     )
 
@@ -295,6 +343,15 @@ async def cancel_task(
             detail=f"Task not found {task_id}",
         )
     await app.agent.update_task(task_obj, status=TaskStatus.canceled)
+
+
+@base_router.post("/workflows/runs/{workflow_run_id}/cancel")
+@base_router.post("/workflows/runs/{workflow_run_id}/cancel/", include_in_schema=False)
+async def cancel_workflow_run(
+    workflow_run_id: str,
+    current_org: Organization = Depends(org_auth_service.get_current_org),
+) -> None:
+    await app.WORKFLOW_SERVICE.mark_workflow_run_as_canceled(workflow_run_id)
 
 
 @base_router.post(
@@ -361,21 +418,39 @@ async def get_agent_tasks(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1),
     task_status: Annotated[list[TaskStatus] | None, Query()] = None,
+    workflow_run_id: Annotated[str | None, Query()] = None,
     current_org: Organization = Depends(org_auth_service.get_current_org),
+    only_standalone_tasks: bool = Query(False),
+    sort: OrderBy = Query(OrderBy.created_at),
+    order: SortDirection = Query(SortDirection.desc),
 ) -> Response:
     """
     Get all tasks.
     :param page: Starting page, defaults to 1
     :param page_size: Page size, defaults to 10
+    :param task_status: Task status filter
+    :param workflow_run_id: Workflow run id filter
+    :param only_standalone_tasks: Only standalone tasks, tasks which are part of a workflow run will be filtered out
+    :param order: Direction to sort by, ascending or descending
+    :param sort: Column to sort by, created_at or modified_at
     :return: List of tasks with pagination without steps populated. Steps can be populated by calling the
         get_agent_task endpoint.
     """
     analytics.capture("skyvern-oss-agent-tasks-get")
+    if only_standalone_tasks and workflow_run_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="only_standalone_tasks and workflow_run_id cannot be used together",
+        )
     tasks = await app.DATABASE.get_tasks(
         page,
         page_size,
         task_status=task_status,
+        workflow_run_id=workflow_run_id,
         organization_id=current_org.organization_id,
+        only_standalone_tasks=only_standalone_tasks,
+        order=order,
+        order_by_column=sort,
     )
     return ORJSONResponse([task.to_task_response().model_dump() for task in tasks])
 
@@ -400,7 +475,9 @@ async def get_agent_tasks_internal(
         get_agent_task endpoint.
     """
     analytics.capture("skyvern-oss-agent-tasks-get-internal")
-    tasks = await app.DATABASE.get_tasks(page, page_size, organization_id=current_org.organization_id)
+    tasks = await app.DATABASE.get_tasks(
+        page, page_size, workflow_run_id=None, organization_id=current_org.organization_id
+    )
     return ORJSONResponse([task.model_dump() for task in tasks])
 
 
@@ -474,25 +551,19 @@ class ActionResultTmp(BaseModel):
     success: bool = True
 
 
-@base_router.get("/tasks/{task_id}/actions", response_model=list[ActionResultTmp])
+@base_router.get("/tasks/{task_id}/actions", response_model=list[Action])
 @base_router.get(
     "/tasks/{task_id}/actions/",
-    response_model=list[ActionResultTmp],
+    response_model=list[Action],
     include_in_schema=False,
 )
 async def get_task_actions(
     task_id: str,
     current_org: Organization = Depends(org_auth_service.get_current_org),
-) -> list[ActionResultTmp]:
+) -> list[Action]:
     analytics.capture("skyvern-oss-agent-task-actions-get")
-    steps = await app.DATABASE.get_task_step_models(task_id, organization_id=current_org.organization_id)
-    results: list[ActionResultTmp] = []
-    for step_s in steps:
-        if not step_s.output or "action_results" not in step_s.output:
-            continue
-        for action_result in step_s.output["action_results"]:
-            results.append(ActionResultTmp.model_validate(action_result))
-    return results
+    actions = await app.DATABASE.get_task_actions(task_id, organization_id=current_org.organization_id)
+    return actions
 
 
 @base_router.post("/workflows/{workflow_id}/run", response_model=RunWorkflowResponse)
@@ -502,6 +573,7 @@ async def get_task_actions(
     include_in_schema=False,
 )
 async def execute_workflow(
+    request: Request,
     background_tasks: BackgroundTasks,
     workflow_id: str,  # this is the workflow_permanent_id
     workflow_request: WorkflowRequestBody,
@@ -524,6 +596,7 @@ async def execute_workflow(
     if x_max_steps_override:
         LOG.info("Overriding max steps per run", max_steps_override=x_max_steps_override)
     await AsyncExecutorFactory.get_executor().execute_workflow(
+        request=request,
         background_tasks=background_tasks,
         organization_id=current_org.organization_id,
         workflow_id=workflow_run.workflow_id,
@@ -534,6 +607,52 @@ async def execute_workflow(
     return RunWorkflowResponse(
         workflow_id=workflow_id,
         workflow_run_id=workflow_run.workflow_run_id,
+    )
+
+
+@base_router.get(
+    "/workflows/runs",
+    response_model=list[WorkflowRun],
+)
+@base_router.get(
+    "/workflows/runs/",
+    response_model=list[WorkflowRun],
+    include_in_schema=False,
+)
+async def get_workflow_runs(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1),
+    current_org: Organization = Depends(org_auth_service.get_current_org),
+) -> list[WorkflowRun]:
+    analytics.capture("skyvern-oss-agent-workflow-runs-get")
+    return await app.WORKFLOW_SERVICE.get_workflow_runs(
+        organization_id=current_org.organization_id,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@base_router.get(
+    "/workflows/{workflow_permanent_id}/runs",
+    response_model=list[WorkflowRun],
+)
+@base_router.get(
+    "/workflows/{workflow_permanent_id}/runs/",
+    response_model=list[WorkflowRun],
+    include_in_schema=False,
+)
+async def get_workflow_runs_for_workflow_permanent_id(
+    workflow_permanent_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1),
+    current_org: Organization = Depends(org_auth_service.get_current_org),
+) -> list[WorkflowRun]:
+    analytics.capture("skyvern-oss-agent-workflow-runs-get")
+    return await app.WORKFLOW_SERVICE.get_workflow_runs_for_workflow_permanent_id(
+        workflow_permanent_id=workflow_permanent_id,
+        organization_id=current_org.organization_id,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -554,6 +673,26 @@ async def get_workflow_run(
     analytics.capture("skyvern-oss-agent-workflow-run-get")
     return await app.WORKFLOW_SERVICE.build_workflow_run_status_response(
         workflow_permanent_id=workflow_id,
+        workflow_run_id=workflow_run_id,
+        organization_id=current_org.organization_id,
+    )
+
+
+@base_router.get(
+    "/workflows/runs/{workflow_run_id}",
+    response_model=WorkflowRunStatusResponse,
+)
+@base_router.get(
+    "/workflows/runs/{workflow_run_id}/",
+    response_model=WorkflowRunStatusResponse,
+    include_in_schema=False,
+)
+async def get_workflow_run_by_run_id(
+    workflow_run_id: str,
+    current_org: Organization = Depends(org_auth_service.get_current_org),
+) -> WorkflowRunStatusResponse:
+    analytics.capture("skyvern-oss-agent-workflow-run-get")
+    return await app.WORKFLOW_SERVICE.build_workflow_run_status_response_by_workflow_id(
         workflow_run_id=workflow_run_id,
         organization_id=current_org.organization_id,
     )
@@ -591,10 +730,16 @@ async def create_workflow(
     except yaml.YAMLError:
         raise HTTPException(status_code=422, detail="Invalid YAML")
 
-    workflow_create_request = WorkflowCreateYAMLRequest.model_validate(workflow_yaml)
-    return await app.WORKFLOW_SERVICE.create_workflow_from_request(
-        organization_id=current_org.organization_id, request=workflow_create_request
-    )
+    try:
+        workflow_create_request = WorkflowCreateYAMLRequest.model_validate(workflow_yaml)
+        return await app.WORKFLOW_SERVICE.create_workflow_from_request(
+            organization=current_org, request=workflow_create_request
+        )
+    except WorkflowParameterMissingRequiredValue as e:
+        raise e
+    except Exception as e:
+        LOG.error("Failed to create workflow", exc_info=True, organization_id=current_org.organization_id)
+        raise FailedToCreateWorkflow(str(e))
 
 
 @base_router.put(
@@ -631,12 +776,22 @@ async def update_workflow(
     except yaml.YAMLError:
         raise HTTPException(status_code=422, detail="Invalid YAML")
 
-    workflow_create_request = WorkflowCreateYAMLRequest.model_validate(workflow_yaml)
-    return await app.WORKFLOW_SERVICE.create_workflow_from_request(
-        organization_id=current_org.organization_id,
-        request=workflow_create_request,
-        workflow_permanent_id=workflow_permanent_id,
-    )
+    try:
+        workflow_create_request = WorkflowCreateYAMLRequest.model_validate(workflow_yaml)
+        return await app.WORKFLOW_SERVICE.create_workflow_from_request(
+            organization=current_org,
+            request=workflow_create_request,
+            workflow_permanent_id=workflow_permanent_id,
+        )
+    except WorkflowParameterMissingRequiredValue as e:
+        raise e
+    except Exception as e:
+        LOG.exception(
+            "Failed to update workflow",
+            workflow_permanent_id=workflow_permanent_id,
+            organization_id=current_org.organization_id,
+        )
+        raise FailedToUpdateWorkflow(workflow_permanent_id, f"<{type(e).__name__}: {str(e)}>")
 
 
 @base_router.delete("/workflows/{workflow_permanent_id}")
@@ -699,6 +854,32 @@ async def generate_task(
     data: GenerateTaskRequest,
     current_org: Organization = Depends(org_auth_service.get_current_org),
 ) -> TaskGeneration:
+    user_prompt = data.prompt
+    hash_object = hashlib.sha256()
+    hash_object.update(user_prompt.encode("utf-8"))
+    user_prompt_hash = hash_object.hexdigest()
+    # check if there's a same user_prompt within the past x Hours
+    # in the future, we can use vector db to fetch similar prompts
+    existing_task_generation = await app.DATABASE.get_task_generation_by_prompt_hash(
+        user_prompt_hash=user_prompt_hash, query_window_hours=SettingsManager.get_settings().PROMPT_CACHE_WINDOW_HOURS
+    )
+    if existing_task_generation:
+        new_task_generation = await app.DATABASE.create_task_generation(
+            organization_id=current_org.organization_id,
+            user_prompt=data.prompt,
+            user_prompt_hash=user_prompt_hash,
+            url=existing_task_generation.url,
+            navigation_goal=existing_task_generation.navigation_goal,
+            navigation_payload=existing_task_generation.navigation_payload,
+            data_extraction_goal=existing_task_generation.data_extraction_goal,
+            extracted_information_schema=existing_task_generation.extracted_information_schema,
+            llm=existing_task_generation.llm,
+            llm_prompt=existing_task_generation.llm_prompt,
+            llm_response=existing_task_generation.llm_response,
+            source_task_generation_id=existing_task_generation.task_generation_id,
+        )
+        return new_task_generation
+
     llm_prompt = prompt_engine.load_prompt("generate-task", user_prompt=data.prompt)
     try:
         llm_response = await app.LLM_API_HANDLER(prompt=llm_prompt)
@@ -708,11 +889,13 @@ async def generate_task(
         task_generation = await app.DATABASE.create_task_generation(
             organization_id=current_org.organization_id,
             user_prompt=data.prompt,
+            user_prompt_hash=user_prompt_hash,
             url=parsed_task_generation_obj.url,
             navigation_goal=parsed_task_generation_obj.navigation_goal,
             navigation_payload=parsed_task_generation_obj.navigation_payload,
             data_extraction_goal=parsed_task_generation_obj.data_extraction_goal,
             extracted_information_schema=parsed_task_generation_obj.extracted_information_schema,
+            suggested_title=parsed_task_generation_obj.suggested_title,
             llm=SettingsManager.get_settings().LLM_KEY,
             llm_prompt=llm_prompt,
             llm_response=str(llm_response),
@@ -721,6 +904,9 @@ async def generate_task(
     except LLMProviderError:
         LOG.error("Failed to generate task", exc_info=True)
         raise HTTPException(status_code=400, detail="Failed to generate task. Please try again later.")
+    except OperationalError:
+        LOG.error("Database error when generating task", exc_info=True, user_prompt=data.prompt)
+        raise HTTPException(status_code=500, detail="Failed to generate task. Please try again later.")
 
 
 @base_router.put("/organizations/", include_in_schema=False)
@@ -731,8 +917,74 @@ async def update_organization(
 ) -> Organization:
     return await app.DATABASE.update_organization(
         current_org.organization_id,
-        organization_name=org_update.organization_name,
-        webhook_callback_url=org_update.webhook_callback_url,
         max_steps_per_run=org_update.max_steps_per_run,
-        max_retries_per_step=org_update.max_retries_per_step,
+    )
+
+
+@base_router.get("/organizations/", include_in_schema=False)
+@base_router.get("/organizations")
+async def get_organizations(
+    current_org: Organization = Depends(org_auth_service.get_current_org),
+) -> GetOrganizationsResponse:
+    return GetOrganizationsResponse(organizations=[current_org])
+
+
+@base_router.get("/organizations/{organization_id}/apikeys/", include_in_schema=False)
+@base_router.get("/organizations/{organization_id}/apikeys")
+async def get_org_api_keys(
+    organization_id: str,
+    current_org: Organization = Depends(org_auth_service.get_current_org),
+) -> GetOrganizationAPIKeysResponse:
+    if organization_id != current_org.organization_id:
+        raise HTTPException(status_code=403, detail="You do not have permission to access this organization")
+    api_keys = []
+    org_auth_token = await app.DATABASE.get_valid_org_auth_token(organization_id, OrganizationAuthTokenType.api)
+    if org_auth_token:
+        api_keys.append(org_auth_token)
+    return GetOrganizationAPIKeysResponse(api_keys=api_keys)
+
+
+async def validate_file_size(file: UploadFile) -> UploadFile:
+    try:
+        file.file.seek(0, 2)  # Move the pointer to the end of the file
+        size = file.file.tell()  # Get the current position of the pointer, which represents the file size
+        file.file.seek(0)  # Reset the pointer back to the beginning
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Could not determine file size.") from e
+
+    if size > app.SETTINGS_MANAGER.MAX_UPLOAD_FILE_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File size exceeds the maximum allowed size ({app.SETTINGS_MANAGER.MAX_UPLOAD_FILE_SIZE/1024/1024} MB)",
+        )
+    return file
+
+
+@base_router.post("/upload_file/", include_in_schema=False)
+@base_router.post("/upload_file")
+async def upload_file(
+    file: UploadFile = Depends(validate_file_size),
+    current_org: Organization = Depends(org_auth_service.get_current_org),
+) -> Response:
+    bucket = app.SETTINGS_MANAGER.AWS_S3_BUCKET_UPLOADS
+    todays_date = datetime.datetime.now().strftime("%Y-%m-%d")
+    uuid_prefixed_filename = f"{str(uuid.uuid4())}_{file.filename}"
+    s3_uri = (
+        f"s3://{bucket}/{app.SETTINGS_MANAGER.ENV}/{current_org.organization_id}/{todays_date}/{uuid_prefixed_filename}"
+    )
+    # Stream the file to S3
+    uploaded_s3_uri = await aws_client.upload_file_stream(s3_uri, file.file)
+    if not uploaded_s3_uri:
+        raise HTTPException(status_code=500, detail="Failed to upload file to S3.")
+
+    # Generate a presigned URL for the uploaded file
+    presigned_urls = await aws_client.create_presigned_urls([uploaded_s3_uri])
+    if not presigned_urls:
+        raise HTTPException(status_code=500, detail="Failed to generate presigned URL.")
+
+    presigned_url = presigned_urls[0]
+    return ORJSONResponse(
+        content={"s3_uri": uploaded_s3_uri, "presigned_url": presigned_url},
+        status_code=200,
+        media_type="application/json",
     )

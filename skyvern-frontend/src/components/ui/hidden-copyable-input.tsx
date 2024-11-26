@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button } from "./button";
 import { Input } from "./input";
 import { CheckIcon, CopyIcon } from "@radix-ui/react-icons";
+import { copyText } from "@/util/copyText";
 
 type Props = {
   value: string;
@@ -17,19 +18,20 @@ function HiddenCopyableInput({ value }: Props) {
   return (
     <div className="relative w-full">
       <Input value={inputValue} className="h-10" readOnly />
-      <div className="absolute flex inset-y-0 items-center right-1">
+      <div className="absolute inset-y-0 right-1 flex items-center">
         <Button
           size="sm"
           variant="secondary"
           className="cursor-pointer"
-          onClick={async () => {
+          onClick={() => {
             if (hidden) {
               setHidden(false);
               return;
             }
-            await navigator.clipboard.writeText(value);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 3000);
+            copyText(value).then(() => {
+              setCopied(true);
+              setTimeout(() => setCopied(false), 3000);
+            });
           }}
         >
           {!hidden && !copied && <CopyIcon className="mr-2 h-4 w-4" />}

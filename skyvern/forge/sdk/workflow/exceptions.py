@@ -20,6 +20,22 @@ class WorkflowDefinitionHasDuplicateBlockLabels(BaseWorkflowHTTPException):
         )
 
 
+class FailedToCreateWorkflow(BaseWorkflowHTTPException):
+    def __init__(self, error_message: str) -> None:
+        super().__init__(
+            f"Failed to create workflow. Error: {error_message}",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+class FailedToUpdateWorkflow(BaseWorkflowHTTPException):
+    def __init__(self, workflow_permanent_id: str, error_message: str) -> None:
+        super().__init__(
+            f"Failed to update workflow with ID {workflow_permanent_id}. Error: {error_message}",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
 class OutputParameterKeyCollisionError(BaseWorkflowHTTPException):
     def __init__(self, key: str, retry_count: int | None = None) -> None:
         message = f"Output parameter key {key} already exists in the context manager."
@@ -75,3 +91,24 @@ class ContextParameterSourceNotDefined(BaseWorkflowHTTPException):
             f"Source parameter key {source_key} for context parameter {context_parameter_key} does not exist.",
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         )
+
+
+class InvalidFileType(BaseWorkflowHTTPException):
+    def __init__(self, file_url: str, file_type: str, error: str) -> None:
+        super().__init__(
+            f"File URL {file_url} is not a valid {file_type} file. Error: {error}",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )
+
+
+class WorkflowParameterMissingRequiredValue(BaseWorkflowHTTPException):
+    def __init__(self, workflow_parameter_type: str, workflow_parameter_key: str, required_value: str) -> None:
+        super().__init__(
+            f"Missing required value for workflow parameter. Workflow parameter type: {workflow_parameter_type}. workflow_parameter_key: {workflow_parameter_key}. Required value: {required_value}",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class InvalidWaitBlockTime(SkyvernException):
+    def __init__(self, max_sec: int):
+        super().__init__(f"Invalid wait time for wait block, it should be a number between 0 and {max_sec}.")

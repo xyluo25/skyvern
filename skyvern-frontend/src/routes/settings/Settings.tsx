@@ -14,10 +14,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { envCredential } from "@/util/env";
+import { HiddenCopyableInput } from "@/components/ui/hidden-copyable-input";
 
 function Settings() {
   const { environment, organization, setEnvironment, setOrganization } =
     useSettingsStore();
+  const apiKey = envCredential;
 
   return (
     <div className="flex flex-col gap-8">
@@ -30,8 +33,8 @@ function Settings() {
         </CardHeader>
         <CardContent className="p-8">
           <div className="flex flex-col gap-4">
-            <div className="flex gap-4 items-center">
-              <Label className="whitespace-nowrap w-36">Environment</Label>
+            <div className="flex items-center gap-4">
+              <Label className="w-36 whitespace-nowrap">Environment</Label>
               <Select value={environment} onValueChange={setEnvironment}>
                 <SelectTrigger>
                   <SelectValue placeholder="Environment" />
@@ -41,8 +44,8 @@ function Settings() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex gap-4 items-center">
-              <Label className="whitespace-nowrap w-36">Organization</Label>
+            <div className="flex items-center gap-4">
+              <Label className="w-36 whitespace-nowrap">Organization</Label>
               <Select value={organization} onValueChange={setOrganization}>
                 <SelectTrigger>
                   <SelectValue placeholder="Organization" />
@@ -53,6 +56,15 @@ function Settings() {
               </Select>
             </div>
           </div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader className="border-b-2">
+          <CardTitle className="text-lg">API Key</CardTitle>
+          <CardDescription>Currently active API key</CardDescription>
+        </CardHeader>
+        <CardContent className="p-8">
+          <HiddenCopyableInput value={apiKey ?? "API key not found"} />
         </CardContent>
       </Card>
     </div>
